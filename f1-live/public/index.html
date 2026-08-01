@@ -161,7 +161,7 @@
         <input id="zielzeit" type="text" placeholder="🎯 Zielzeit z.B. 1:23.500"
                style="width:auto; flex:1; min-width:140px; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px" />
       </div>
-      <div class="rg-hinweis" style="margin-bottom:0.9rem">Er meldet sich von selbst. Zum <b>Fragen</b>: Taste <b>T</b> drücken – oder „Ohren" an und seinen Namen sagen (z.B. „Chef, wie sind die Reifen?"). Mit <b>🧠 Chef PRO</b> antwortet der echte KI-Ingenieur (Claude) und sieht dabei deine Live-Daten.</div>
+      <div class="rg-hinweis" style="margin-bottom:0.9rem">Er meldet sich von selbst und rechnet echte Strategie – <b>kostenlos & offline</b>. Zum <b>Fragen</b>: Taste <b>T</b> drücken, „Ohren" an + seinen Namen sagen, oder unten tippen. Probier: „Strategie", „wann an die Box", „reicht der Sprit", „wie ist meine Pace". <span style="opacity:0.7">(🧠 Chef PRO ist ein optionaler KI-Ingenieur – braucht einen eigenen Schlüssel, nicht nötig.)</span></div>
       <div style="display:flex; gap:0.5rem; margin-bottom:0.9rem">
         <input id="chef-text" type="text" placeholder="Chef fragen (tippen + Enter) …"
                style="flex:1; min-width:0; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.85rem; padding:0.5rem 0.7rem; border-radius:6px" />
@@ -639,6 +639,26 @@
             rgMelde('Abbau kostet dich bis zum Ende noch etwa ' + komma(kosten, 1) + ' Sekunden.', 'rg-warn', 'abbaukosten', 60000, 'info');
           }
         }
+
+        // Positiver Pace-Trend -> anfeuern (nur bei klarer Steigerung)
+        if (runden.length >= 4) {
+          const pt = paceTrend(runden);
+          if (pt && pt.richtung === 'schneller' && Math.abs(pt.slope) > 0.15) {
+            rgMelde(waehle([
+              'Du steigerst dich, ' + komma(Math.abs(pt.slope), 2) + ' Sekunden schneller pro Runde. Genau so!',
+              'Die Pace kommt – ' + komma(Math.abs(pt.slope), 2) + ' pro Runde besser. Dranbleiben.',
+            ]), 'rg-gut', 'pace-gut', 45000, 'info');
+          }
+        }
+
+        // Schlussphase -> ruhig nach Hause bringen
+        const rest = restRunden(d);
+        if (rest != null && rest > 0 && rest <= 3) {
+          rgMelde(waehle([
+            'Noch ' + rest + ' Runden. Sauber und konzentriert nach Hause bringen.',
+            'Letzte ' + rest + ' Runden – keine Fehler jetzt, das Ergebnis steht.',
+          ]), '', 'schluss', 999999, 'info');
+        }
       }
 
       // Dauer-Bedingungen (mit Cooldown)
@@ -705,41 +725,238 @@
     // Zielzeit übernehmen (wird bei jeder fertigen Runde verglichen)
     $('zielzeit').addEventListener('input', () => { zielMs = zeitTextZuMs($('zielzeit').value); });
 
+    // ==========================================================
+    // STRATEGIE-HELFER – frei, lokal, ohne Internet
+    // Diese kleinen Funktionen rechnen echte Renn-Strategie aus den
+    // Live-Daten. Sie sind bewusst einfach gehalten und leicht testbar.
+    // ==========================================================
+    const RAD_NAMEN = { FL: 'vorne links', FR: 'vorne rechts', RL: 'hinten links', RR: 'hinten rechts' };
+
+    // wählt zufällig eine Formulierung -> klingt menschlicher, nicht wie ein Roboter
+    function waehle(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    // welcher Reifen ist am stärksten abgebaut?
+    function schlimmsterReifen(wear) {
+      if (!wear) return null;
+      let pos = 'FL';
+      ['FR', 'RL', 'RR'].forEach(p => { if (wear[p] > wear[pos]) pos = p; });
+      return { pos, name: RAD_NAMEN[pos], wert: wear[pos] };
+    }
+
+    // wie viele Runden noch bis zum Ziel?
+    function restRunden(d) {
+      if (d.totalLaps && d.lapNum) return Math.max(0, d.totalLaps - d.lapNum);
+      return null;
+    }
+
+    // Vorhersage: in wie vielen Runden sind die Reifen "kritisch"?
+    function rundenBisKritisch(d) {
+      const wear = d.reifenAbnutzung;
+      if (!wear) return null;
+      const mw = Math.max(wear.FL, wear.FR, wear.RL, wear.RR);
+      const rate = wearRatePerLap(RG.wearHistory);
+      if (rate <= 0.05) return { rate: 0, mw, runden: null };   // (noch) kein Abbau messbar
+      return { rate, mw, runden: Math.max(0, Math.floor((RG.schwellen.kritisch - mw) / rate)) };
+    }
+
+    // Sprit-Lage bis Rennende: reicht es, muss ich sparen, wie viel?
+    function spritLage(d) {
+      if (d.fuelRemainingLaps == null) return null;
+      const rest = restRunden(d);
+      if (rest == null) {
+        return { rest: null, reichweite: d.fuelRemainingLaps, status: d.fuelRemainingLaps < 2 ? 'kritisch' : 'unbekannt' };
+      }
+      const defizit = rest - d.fuelRemainingLaps;   // >0 = zu wenig für die Distanz
+      let status = 'ok';
+      if (defizit > 0.3) status = 'knapp';
+      if (d.fuelRemainingLaps < 1.5) status = 'kritisch';
+      const sparProz = (defizit > 0 && rest > 0) ? Math.min(25, Math.round((defizit / rest) * 100)) : 0;
+      return { rest, reichweite: d.fuelRemainingLaps, defizit, status, sparProz, puffer: -defizit };
+    }
+
+    // Pace-Trend der letzten Runden: wirst du schneller, stabil oder langsamer?
+    function paceTrend(runden) {
+      if (!runden || runden.length < 3) return null;
+      const s = berechneTrend(runden.slice(-5)).slope / 1000;   // Sekunden pro Runde
+      let richtung = 'stabil';
+      if (s > 0.08) richtung = 'langsamer';
+      else if (s < -0.08) richtung = 'schneller';
+      return { slope: s, richtung };
+    }
+
+    // Temperatur-Fenster eines Reifens
+    function tempFenster(t) {
+      if (t == null) return null;
+      if (t < 80) return 'kalt';
+      if (t <= RG.schwellen.heiss) return 'optimal';
+      return 'heiss';
+    }
+
+    // Kompletter Strategie-Funkspruch: alles Wichtige in einem Satz + Empfehlung.
+    function strategieFunk(d) {
+      const runden = d.fertigeRunden || [];
+      const teile = [];
+      if (d.position) teile.push('P' + d.position);
+      const r = restRunden(d);
+      if (r != null) teile.push('noch ' + r + ' Runden');
+      if (runden.length) teile.push('Best ' + msZuZeit(Math.min(...runden)));
+      const bk = rundenBisKritisch(d);
+      const s = schlimmsterReifen(d.reifenAbnutzung);
+      if (s) {
+        let rt = 'Reifen ' + s.name + ' ' + Math.round(s.wert) + ' Prozent';
+        if (bk && bk.runden != null && bk.runden > 0) rt += ', halten noch etwa ' + bk.runden + ' Runden';
+        teile.push(rt);
+      }
+      const sl = spritLage(d);
+      if (sl) {
+        if (sl.status === 'ok') teile.push('Sprit reicht');
+        else if (sl.status === 'knapp') teile.push('Sprit knapp, etwa ' + sl.sparProz + ' Prozent sparen');
+        else if (sl.status === 'kritisch') teile.push('Sprit kritisch');
+      }
+      const pt = paceTrend(runden);
+      if (pt) teile.push('Pace ' + pt.richtung);
+      if (!teile.length) return 'Noch zu wenig Daten. Fahr ein paar Runden, dann gebe ich dir den vollen Plan.';
+      let rat = '';
+      const kritisch = s && s.wert >= RG.schwellen.kritisch;
+      if (kritisch) {
+        rat = (r != null && r <= 2)
+          ? ' Plan: Reifen am Limit, aber nur noch ' + r + ' Runden – durchbeißen und nach Hause bringen.'
+          : ' Plan: Reifen kritisch, Boxenstopp jetzt.';
+      } else if (bk && bk.runden != null && r != null) {
+        rat = (bk.runden >= r - 1)
+          ? ' Plan: durchfahren, die Reifen reichen bis ins Ziel.'
+          : ' Plan: ein Stopp, Box-Fenster um Runde ' + ((d.lapNum || 0) + bk.runden) + '.';
+      }
+      return teile.join(', ') + '.' + rat;
+    }
+
     // ---------- Sprachbefehle: mit dem Renningenieur reden ----------
-    // Beantwortet eine gesprochene Frage anhand der aktuellen Daten.
+    // Beantwortet eine gesprochene oder getippte Frage anhand der Live-Daten –
+    // versteht viele Formulierungen und rechnet echte Strategie aus.
     function rgAntwort(befehl, d) {
       const t = (befehl || '').toLowerCase();
       const wear = d.reifenAbnutzung;
-      if (/temperatur|temp/.test(t)) {
+      const runden = d.fertigeRunden || [];
+
+      // Hilfe / was kann er
+      if (/hilfe|was kannst|was kann ich fragen|befehl|kommando/.test(t)) {
+        return 'Frag mich nach Reifen, Box, Sprit, Temperatur, Delta oder Pace – oder sag „Strategie" beziehungsweise „wie läufts" für den kompletten Überblick.';
+      }
+
+      // Motivation / Zuspruch
+      if (/motivier|anfeuer|feuer mich|mut|glaubst du|schaff|packe? ich|wird das/.test(t)) {
+        return waehle([
+          'Kopf hoch, du hast die Pace. Eine Runde nach der anderen.',
+          'Sauber bleiben, Fehler kosten mehr als jedes Risiko. Du machst das stark.',
+          'Ruhig und konstant, dann kommt das Ergebnis von selbst. Ich bin bei dir.',
+        ]);
+      }
+
+      // Strategie / Gesamt-Status
+      if (/strateg|plan|zusammenfass|überblick|ueberblick|wie läuft|wie laeuft|wie steht|status|lage|gesamt/.test(t)) {
+        return strategieFunk(d);
+      }
+
+      // Undercut / Overcut erklären
+      if (/undercut|overcut|übercut|uebercut/.test(t)) {
+        const bk = rundenBisKritisch(d);
+        const basis = (bk && bk.runden) ? ' Deine Reifen halten noch etwa ' + bk.runden + ' Runden, also ' +
+                      (bk.runden <= 3 ? 'eher ein Undercut.' : 'noch Zeit für einen Overcut.') : '';
+        return 'Undercut heißt früher an die Box und auf frischen Reifen sofort pushen, um den Gegner beim Stopp zu überholen. Overcut ist andersrum: länger draußen bleiben, solange deine Reifen noch gut sind.' + basis;
+      }
+
+      // Temperatur mit Rat
+      if (/temperatur|temp|hitze|kalt|warm|grip/.test(t)) {
         const tp = d.reifenTemp;
-        if (!tp) return 'Ich habe noch keine Temperaturdaten.';
-        return 'Reifen vorne ' + tp.FL + ' und ' + tp.FR + ' Grad, hinten ' + tp.RL + ' und ' + tp.RR + ' Grad.';
+        if (!tp) return 'Noch keine Temperaturdaten.';
+        const schnitt = Math.round((tp.FL + tp.FR + tp.RL + tp.RR) / 4);
+        const maxT = Math.max(tp.FL, tp.FR, tp.RL, tp.RR);
+        const f = tempFenster(maxT);   // der heißeste Reifen bestimmt den Rat
+        let rat = ' Schön im Fenster, so weiterfahren.';
+        if (f === 'kalt') rat = ' Noch kühl – kurz pushen zum Aufwärmen, dann greifen sie besser.';
+        else if (f === 'heiss') rat = ' Zu heiß – ein, zwei Runden schonen, sonst baust du ab.';
+        return 'Reifen im Schnitt ' + schnitt + ' Grad, vorne ' + tp.FL + ' und ' + tp.FR + ', hinten ' + tp.RL + ' und ' + tp.RR + '.' + rat;
       }
-      if (/box|pit|stopp/.test(t)) {
+
+      // Box / Pit -> vorhergesagtes Fenster + Undercut-Hinweis
+      if (/box|pit|stopp|wann rein|reinkomm/.test(t)) {
         if (!wear) return 'Noch keine Reifendaten für die Box.';
-        const mw = Math.max(wear.FL, wear.FR, wear.RL, wear.RR);
-        return 'Reifen bei ' + Math.round(mw) + ' Prozent. ' + (mw >= RG.schwellen.kritisch ? 'Rein zur Box!' : 'Noch kein Boxenstopp nötig.');
+        const s = schlimmsterReifen(wear);
+        const bk = rundenBisKritisch(d);
+        if (s.wert >= RG.schwellen.kritisch) return 'Reifen ' + s.name + ' bei ' + Math.round(s.wert) + ' Prozent. Sofort rein zur Box!';
+        if (bk && bk.runden === 0) return 'Reifen fast durch – diese oder nächste Runde an die Box.';
+        if (bk && bk.runden != null) {
+          const rest = restRunden(d);
+          let z = 'Noch kein Stopp nötig. ' + s.name + ' bei ' + Math.round(s.wert) + ' Prozent, halten noch etwa ' + bk.runden + ' Runden.';
+          if (rest != null && bk.runden >= rest - 1) z += ' Das reicht bis ins Ziel – du kannst durchfahren.';
+          else z += ' Box-Fenster um Runde ' + ((d.lapNum || 0) + bk.runden) + '.';
+          return z;
+        }
+        return 'Reifen ' + s.name + ' bei ' + Math.round(s.wert) + ' Prozent, aktuell kein Boxenstopp nötig.';
       }
-      if (/reifen|abnutz|verschleiß|verschleiss/.test(t)) {
+
+      // Reifen / Verschleiß -> schlimmstes Rad, Rate, Rest
+      if (/reifen|abnutz|verschleiß|verschleiss|zustand|abbau/.test(t)) {
         if (!wear) return 'Noch keine Reifendaten.';
-        const mw = Math.max(wear.FL, wear.FR, wear.RL, wear.RR);
-        return 'Reifen ' + (d.reifen ? d.reifen.name : '') + ', maximal ' + Math.round(mw) + ' Prozent Abnutzung.';
+        const s = schlimmsterReifen(wear);
+        const bk = rundenBisKritisch(d);
+        let z = (d.reifen ? d.reifen.name + '-Reifen. ' : '') + 'Am stärksten ab ist ' + s.name + ' mit ' + Math.round(s.wert) + ' Prozent';
+        if (bk && bk.rate > 0.05) z += ', etwa ' + komma(bk.rate, 1) + ' Prozent pro Runde';
+        z += '.';
+        if (bk && bk.runden) z += ' Halten noch rund ' + bk.runden + ' Runden.';
+        return z;
       }
-      if (/sprit|benzin|tank|fuel/.test(t)) {
-        if (d.fuelRemainingLaps == null) return 'Ich habe keine Spritdaten.';
-        return 'Sprit reicht noch für ' + komma(d.fuelRemainingLaps, 1) + ' Runden.';
+
+      // Sprit -> Reichweite bis Ende, Sparziel oder Reserve
+      if (/sprit|benzin|tank|fuel|reicht.*sprit|sprit.*reicht/.test(t)) {
+        const sl = spritLage(d);
+        if (!sl) return 'Ich habe keine Spritdaten.';
+        if (sl.status === 'kritisch') return 'Sprit fast leer, nur noch ' + komma(sl.reichweite, 1) + ' Runden. Jetzt heben und rollen.';
+        if (sl.rest == null) return 'Sprit reicht noch für ' + komma(sl.reichweite, 1) + ' Runden.';
+        if (sl.status === 'knapp') return 'Sprit knapp: ' + komma(sl.defizit, 1) + ' Runden Defizit bei ' + sl.rest + ' Rest. Etwa ' + sl.sparProz + ' Prozent sparen – später bremsen und heben.';
+        return 'Sprit passt: Reichweite ' + komma(sl.reichweite, 1) + ' Runden bei ' + sl.rest + ' zu fahren. Rund ' + komma(sl.puffer, 1) + ' Runden Reserve, du kannst pushen.';
       }
-      if (/delta|bestzeit|beste/.test(t)) {
-        const r = d.fertigeRunden || [];
-        return r.length ? 'Deine Bestzeit ist ' + msZuZeit(Math.min(...r)) + '.' : 'Noch keine Runde gefahren.';
+
+      // Delta / Pace / Konstanz
+      if (/delta|pace|schnell|langsam|konstan|tempo|trend/.test(t)) {
+        if (!runden.length) return 'Noch keine Runde gefahren.';
+        const best = Math.min(...runden);
+        const pt = paceTrend(runden);
+        let z = 'Bestzeit ' + msZuZeit(best) + '.';
+        if (runden.length >= 2) z += ' Letzte ' + msZuZeit(runden[runden.length - 1]) + '.';
+        if (pt) {
+          if (pt.richtung === 'schneller') z += ' Du wirst schneller, ' + komma(Math.abs(pt.slope), 2) + ' Sekunden pro Runde – weiter so.';
+          else if (pt.richtung === 'langsamer') z += ' Du wirst langsamer, ' + komma(pt.slope, 2) + ' pro Runde – Reifen oder Konzentration.';
+          else z += ' Schön konstant.';
+        }
+        return z;
       }
-      if (/position|platz/.test(t)) {
-        return d.position ? 'Du bist auf Position ' + d.position + '.' : 'Ich habe keine Positionsdaten.';
+
+      if (/bestzeit|beste/.test(t)) {
+        return runden.length ? 'Deine Bestzeit ist ' + msZuZeit(Math.min(...runden)) + '.' : 'Noch keine Runde gefahren.';
+      }
+
+      // Position
+      if (/position|platz|wo bin|wievielt/.test(t)) {
+        const r = restRunden(d);
+        return d.position
+          ? 'Du bist auf Position ' + d.position + (r != null ? ', noch ' + r + ' Runden.' : '.')
+          : 'Ich habe keine Positionsdaten.';
+      }
+
+      // Restdistanz
+      if (/wie viele runden|wieviele runden|noch runden|restrunden|wie lange noch/.test(t)) {
+        const r = restRunden(d);
+        return r != null ? 'Noch ' + r + ' Runden bis zum Ziel.' : 'Ich kenne die Renndistanz gerade nicht.';
       }
       if (/runde|zeit/.test(t)) {
         return d.lastLapMs ? 'Letzte Runde ' + msZuZeit(d.lastLapMs) + '.' : 'Noch keine fertige Runde.';
       }
-      return 'Das habe ich nicht verstanden. Frag zum Beispiel nach Reifen, Sprit, Box, Bestzeit oder Position.';
+
+      return waehle([
+        'Das habe ich nicht ganz verstanden. Frag zum Beispiel nach Reifen, Sprit, Box, Pace – oder sag „Strategie".',
+        'Sag es nochmal anders, zum Beispiel „wie sind die Reifen", „wie viel Sprit", oder „was ist der Plan".',
+      ]);
     }
 
     let erkennung = null, hoert = false;
