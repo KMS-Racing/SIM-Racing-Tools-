@@ -26,7 +26,7 @@ const HEADER_SIZE = 29;
 // die übrigen Zahlen sind Offsets INNERHALB eines Auto-Blocks
 // (session-Offsets sind relativ zum Header-Ende).
 const LAYOUT_25 = {
-  lapData:   { size: 57, lastLapMs: 0, currentLapMs: 4, position: 32, lapNum: 33 },
+  lapData:   { size: 57, lastLapMs: 0, currentLapMs: 4, lapDistance: 20, position: 32, lapNum: 33 },
   telemetry: { size: 60, speed: 0, surfaceTempStart: 30 },
   status:    { size: 55, fuelInTank: 5, fuelRemainingLaps: 13, visualCompound: 26, tyresAge: 27 },
   damage:    { size: 42, tyresWearStart: 0 },
@@ -94,6 +94,7 @@ function parse(buf, zustand) {
       if (buf.length < o + f.size) break;
       zustand.lastLapMs    = buf.readUInt32LE(o + f.lastLapMs);
       zustand.currentLapMs = buf.readUInt32LE(o + f.currentLapMs);
+      zustand.lapDistance  = buf.readFloatLE(o + f.lapDistance); // Meter seit Start/Ziel
       zustand.position     = buf.readUInt8(o + f.position);
       zustand.lapNum       = buf.readUInt8(o + f.lapNum);
       break;

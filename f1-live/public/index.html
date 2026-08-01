@@ -52,6 +52,10 @@
     .live-zeit { text-align: center; }
     .live-zeit .gross { font-size: 3rem; font-weight: bold; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
     .live-zeit .klein { font-size: 0.7rem; color: var(--grau); text-transform: uppercase; letter-spacing: 0.15em; margin-top: 0.25rem; }
+    .live-delta { font-size: 1.2rem; font-weight: bold; font-variant-numeric: tabular-nums; margin-top: 0.4rem; min-height: 1.4rem; }
+    .live-delta .dn { font-size: 0.6rem; color: var(--grau); text-transform: uppercase; letter-spacing: 0.12em; font-weight: normal; }
+    .delta-gut { color: var(--gruen); }
+    .delta-schlecht { color: var(--rot); }
 
     /* Reihe kleiner Kennzahl-Kacheln */
     .kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.75rem; }
@@ -121,6 +125,7 @@
     <div class="karte live-zeit">
       <div class="gross" id="live-lap">–:––.–––</div>
       <div class="klein">Aktuelle Runde · Runde <span id="lap-num">–</span> · P<span id="pos">–</span></div>
+      <div class="live-delta" id="live-delta"></div>
     </div>
 
     <!-- Renningenieur (Live-Ansagen) -->
@@ -312,20 +317,60 @@
     }
 
     // ==========================================================
-    // RENNINGENIEUR – Live-Ansagen (Text + optional Sprache)
+    // RENNINGENIEUR – vorausschauende Live-Ansagen
     // ==========================================================
     const RG = {
-      sprache: false,     // Sprachausgabe an/aus (Text ist immer an)
-      stimme: null,       // gewählte deutsche Stimme
-      cooldowns: {},      // verhindert, dass dieselbe Ansage zu oft kommt
-      prevLapCount: 0,    // um eine frisch beendete Runde zu erkennen
-      lastBestMs: null,   // bisher beste Runde
-      lastReifen: null,   // um Reifenwechsel zu erkennen
+      sprache: false,      // Sprachausgabe an/aus (Text ist immer an)
+      stimme: null,        // gewählte deutsche Stimme
+      cooldowns: {},       // bremst Wiederholungen
+      prevLapCount: 0,     // um eine frisch beendete Runde zu erkennen
+      lastBestMs: null,    // bisher beste Runde
+      lastReifen: null,    // um Reifenwechsel zu erkennen
+      wearHistory: [],     // {lap, wear} je beendeter Runde -> Verschleiß-Vorhersage
+      bestLapMs: Infinity, // beste Rundenzeit (für Live-Delta)
+      bestTrace: null,     // [{d, t}] Zeitverlauf der schnellsten Runde
+      currentTrace: [],    // [{d, t}] Zeitverlauf der laufenden Runde
+      lastDist: null,      // letzte Streckenposition (Rundengrenze erkennen)
+      lastPushDist: null,  // letzter Trace-Stützpunkt
+      stintStartCount: 0,  // ab welcher Runde der aktuelle Reifensatz läuft
+      lastSpeakAt: 0,      // Zeitpunkt der letzten gesprochenen Ansage
     };
 
-    // Schreibt eine Ansage in den Feed (und spricht sie, falls Funk an ist).
-    // key + cooldownMs sorgen dafür, dass Wiederholungen gebremst werden.
-    function rgMelde(text, klasse, key, cooldownMs) {
+    const WEAR_LIMIT = 100;  // Reifen bei 100 % "runter"
+    const SPEAK_GAP = 4000;  // Mindestabstand gesprochener Ansagen (ms)
+
+    // deutsche Zahl-Ausgabe (Komma statt Punkt)
+    const komma = (zahl, stellen) => zahl.toFixed(stellen).replace('.', ',');
+
+    // ---- reine Rechen-Helfer (leicht testbar) ----
+
+    // Interpoliert die Zeit der Best-Runde an einer Streckenposition
+    function interpTrace(trace, dist) {
+      if (!trace || trace.length === 0) return null;
+      if (dist <= trace[0].d) return trace[0].t;
+      if (dist >= trace[trace.length - 1].d) return trace[trace.length - 1].t;
+      for (let i = 0; i < trace.length - 1; i++) {
+        const a = trace[i], b = trace[i + 1];
+        if (dist >= a.d && dist <= b.d) {
+          const f = (dist - a.d) / ((b.d - a.d) || 1);
+          return a.t + f * (b.t - a.t);
+        }
+      }
+      return trace[trace.length - 1].t;
+    }
+
+    // Reifenverschleiß pro Runde (%/Runde) aus den letzten Messpunkten
+    function wearRatePerLap(history) {
+      if (history.length < 2) return 0;
+      const p = history.slice(-5);
+      const dLap = p[p.length - 1].lap - p[0].lap;
+      if (dLap <= 0) return 0;
+      return (p[p.length - 1].wear - p[0].wear) / dLap;
+    }
+
+    // ---- Ausgabe ----
+
+    function rgMelde(text, klasse, key, cooldownMs, prio) {
       const jetzt = Date.now();
       if (key && RG.cooldowns[key] && (jetzt - RG.cooldowns[key]) < cooldownMs) return;
       if (key) RG.cooldowns[key] = jetzt;
@@ -339,21 +384,26 @@
       const zeit = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       el.innerHTML = '<span class="rg-zeit">' + zeit + '</span>' + text;
       feed.prepend(el);
-      while (feed.children.length > 12) feed.removeChild(feed.lastChild);
+      while (feed.children.length > 14) feed.removeChild(feed.lastChild);
 
-      if (RG.sprache) rgSprich(text);
+      rgSprich(text, prio || 'info');
     }
 
-    // Liest einen Text laut vor (deutsche Browser-Stimme, komplett offline)
-    function rgSprich(text) {
-      if (!('speechSynthesis' in window)) return;
+    // Spricht priorisiert: Kritisches sofort, alles andere nur mit Abstand,
+    // damit der Funk ruhig bleibt und nicht dazwischenquatscht.
+    function rgSprich(text, prio) {
+      if (!RG.sprache || !('speechSynthesis' in window)) return;
+      const jetzt = Date.now();
+      if (prio !== 'krit' && (jetzt - RG.lastSpeakAt) < SPEAK_GAP) return;
       try {
+        if (prio === 'krit') window.speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
         u.lang = 'de-DE';
         if (RG.stimme) u.voice = RG.stimme;
         u.rate = 1.05;
         window.speechSynthesis.speak(u);
-      } catch (e) { /* Sprachausgabe nicht verfügbar – dann eben nur Text */ }
+        RG.lastSpeakAt = jetzt;
+      } catch (e) { /* egal – dann nur Text */ }
     }
 
     function rgLadeStimme() {
@@ -363,86 +413,151 @@
     }
     if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = rgLadeStimme;
 
-    // kleine Helfer für deutsche Zahl-Ausgabe (Komma statt Punkt)
-    const komma = (zahl, stellen) => zahl.toFixed(stellen).replace('.', ',');
+    // ---- Live-Delta zur Bestrunde (Anzeige + Trace-Pflege) ----
+    function rgDelta(d) {
+      if (d.lapDistance == null || d.currentLapMs == null) return;
 
-    // Die eigentliche "Renningenieur-Logik": prüft Regeln und meldet.
+      // Rundengrenze: Streckenposition fällt stark -> neue Runde begonnen
+      if (RG.lastDist != null && d.lapDistance < RG.lastDist - 50) {
+        if (d.lastLapMs > 0 && d.lastLapMs < RG.bestLapMs && RG.currentTrace.length > 3) {
+          RG.bestLapMs = d.lastLapMs;
+          RG.bestTrace = RG.currentTrace;   // schnellste Runde als Referenz merken
+        }
+        RG.currentTrace = [];
+        RG.lastPushDist = null;
+      }
+      RG.lastDist = d.lapDistance;
+
+      // Stützpunkt der laufenden Runde aufnehmen (alle ~25 m, gedeckelt)
+      if (RG.lastPushDist == null || d.lapDistance - RG.lastPushDist >= 25) {
+        RG.currentTrace.push({ d: d.lapDistance, t: d.currentLapMs });
+        RG.lastPushDist = d.lapDistance;
+        if (RG.currentTrace.length > 500) RG.currentTrace.shift();
+      }
+
+      // Delta = aktuelle Zeit minus Best-Zeit an derselben Streckenposition
+      const el = $('live-delta');
+      if (RG.bestTrace && RG.bestTrace.length > 3) {
+        const ref = interpTrace(RG.bestTrace, d.lapDistance);
+        if (ref != null) {
+          const delta = (d.currentLapMs - ref) / 1000;
+          const vz = delta >= 0 ? '+' : '−';
+          el.className = 'live-delta ' + (delta <= 0 ? 'delta-gut' : 'delta-schlecht');
+          el.innerHTML = vz + komma(Math.abs(delta), 3) + ' <span class="dn">zur Bestrunde</span>';
+        }
+      } else {
+        el.innerHTML = '<span class="dn">Bestrunde wird aufgezeichnet …</span>';
+      }
+    }
+
+    // ---- Hauptprüfung: wird bei jedem Daten-Update aufgerufen ----
     function rgPruefe(d) {
-      // --- Reifenwechsel erkennen ---
+      rgDelta(d);
+
+      // Reifenwechsel -> Stint-Zusammenfassung + Reset der Vorhersage
       if (d.reifen && d.reifen.name && d.reifen.name !== '—' && d.reifen.name !== RG.lastReifen) {
         if (RG.lastReifen !== null) {
-          rgMelde('Frische Reifen: ' + d.reifen.name + '.', 'rg-gut', 'reifenwechsel', 5000);
-          ['abbau', 'pit', 'heiss-FL', 'heiss-FR', 'heiss-RL', 'heiss-RR'].forEach(k => delete RG.cooldowns[k]);
+          const alle = d.fertigeRunden || [];
+          const stint = alle.slice(RG.stintStartCount);
+          if (stint.length >= 2) {
+            const best = Math.min(...stint);
+            const tr = berechneTrend(stint);
+            rgMelde('Stint beendet: ' + stint.length + ' Runden, Best ' + msZuZeit(best) +
+                    ', Abbau ' + komma(tr.slope / 1000, 2) + ' Sekunden pro Runde.', '', 'stint', 5000, 'info');
+          }
+          rgMelde('Frische Reifen: ' + d.reifen.name + '.', 'rg-gut', 'reifenwechsel', 5000, 'info');
+          ['pit', 'pitfenster', 'abbaukosten', 'heiss-FL', 'heiss-FR', 'heiss-RL', 'heiss-RR'].forEach(k => delete RG.cooldowns[k]);
+          RG.stintStartCount = alle.length;
+          RG.wearHistory = [];
         }
         RG.lastReifen = d.reifen.name;
       }
 
-      // --- Ereignisse bei jeder frisch beendeten Runde ---
+      // Ereignisse bei jeder frisch beendeten Runde
       const runden = d.fertigeRunden || [];
       if (runden.length > RG.prevLapCount) {
         RG.prevLapCount = runden.length;
         const letzte = runden[runden.length - 1];
         const best = Math.min(...runden);
 
+        // Verschleiß-Verlauf mitschreiben (Grundlage der Vorhersage)
+        if (d.reifenAbnutzung && d.lapNum) {
+          const mw = Math.max(d.reifenAbnutzung.FL, d.reifenAbnutzung.FR, d.reifenAbnutzung.RL, d.reifenAbnutzung.RR);
+          RG.wearHistory.push({ lap: d.lapNum, wear: mw });
+        }
+
         // Neue Bestzeit
         if (runden.length >= 2 && letzte === best && (RG.lastBestMs === null || best < RG.lastBestMs)) {
-          rgMelde('Neue Bestzeit! ' + msZuZeit(best) + '.', 'rg-gut', null, 0);
+          rgMelde('Neue Bestzeit! ' + msZuZeit(best) + '.', 'rg-gut', null, 0, 'info');
         }
         RG.lastBestMs = best;
 
-        // Reifen-Abbau (Trend über die Runden)
+        // Konstanz der letzten drei Runden
         if (runden.length >= 3) {
-          const t = berechneTrend(runden);
-          const proRunde = t.slope / 1000;
-          if (proRunde > 0.05) {
-            rgMelde('Reifen bauen ab, plus ' + komma(proRunde, 2) + ' Sekunden pro Runde.', 'rg-warn', 'abbau', 45000);
+          const l3 = runden.slice(-3);
+          const spread = (Math.max(...l3) - Math.min(...l3)) / 1000;
+          if (spread > 0.6) {
+            rgMelde('Wird unruhig, ' + komma(spread, 1) + ' Sekunden Streuung. Rhythmus finden.', 'rg-warn', 'konstanz', 30000, 'info');
           }
         }
 
-        // Konstanz der letzten drei Runden
-        if (runden.length >= 3) {
-          const letzte3 = runden.slice(-3);
-          const spread = (Math.max(...letzte3) - Math.min(...letzte3)) / 1000;
-          if (spread > 0.6) {
-            rgMelde('Wird unruhig, ' + komma(spread, 1) + ' Sekunden Streuung. Rhythmus finden.', 'rg-warn', 'konstanz', 30000);
+        // Vorausschauendes Boxenstopp-Fenster (aus gemessenem Verschleiß)
+        if (d.reifenAbnutzung) {
+          const mw = Math.max(d.reifenAbnutzung.FL, d.reifenAbnutzung.FR, d.reifenAbnutzung.RL, d.reifenAbnutzung.RR);
+          const rate = wearRatePerLap(RG.wearHistory);
+          if (rate > 0.3 && mw < 85) {
+            const restReifen = Math.max(0, Math.floor((WEAR_LIMIT - mw) / rate));
+            let text = 'Reifen bei ' + Math.round(mw) + ' Prozent, ' + komma(rate, 1) +
+                       ' Prozent pro Runde. Halten noch etwa ' + restReifen + ' Runden.';
+            if (d.totalLaps && d.lapNum) {
+              const fenster = d.lapNum + restReifen;
+              if (fenster < d.totalLaps) text += ' Boxenstopp-Fenster ab Runde ' + fenster + '.';
+            }
+            rgMelde(text, 'rg-warn', 'pitfenster', 40000, 'info');
+          }
+        }
+
+        // Abbau-Kosten bis Rennende
+        if (runden.length >= 3 && d.totalLaps && d.lapNum) {
+          const tr = berechneTrend(runden);
+          const kosten = (tr.slope / 1000) * (d.totalLaps - d.lapNum);
+          if (kosten > 1.5) {
+            rgMelde('Abbau kostet dich bis zum Ende noch etwa ' + komma(kosten, 1) + ' Sekunden.', 'rg-warn', 'abbaukosten', 60000, 'info');
           }
         }
       }
 
-      // --- Dauer-Bedingungen (mit Cooldown gegen Spam) ---
+      // Dauer-Bedingungen (mit Cooldown)
 
-      // Reifen-Abnutzung / Boxenstopp
-      const w = d.reifenAbnutzung;
-      if (w) {
-        const maxWear = Math.max(w.FL, w.FR, w.RL, w.RR);
-        if (maxWear >= 85) {
-          rgMelde('Reifen kritisch bei ' + Math.round(maxWear) + ' Prozent. Rein zur Box!', 'rg-krit', 'pit', 30000);
-        } else if (maxWear >= 70) {
-          rgMelde('Reifen bei ' + Math.round(maxWear) + ' Prozent. Boxenstopp vorbereiten.', 'rg-warn', 'pit', 60000);
+      // Reifen kritisch -> sofort, höchste Priorität
+      if (d.reifenAbnutzung) {
+        const mw = Math.max(d.reifenAbnutzung.FL, d.reifenAbnutzung.FR, d.reifenAbnutzung.RL, d.reifenAbnutzung.RR);
+        if (mw >= 85) {
+          rgMelde('Reifen kritisch bei ' + Math.round(mw) + ' Prozent. Rein zur Box!', 'rg-krit', 'pit', 25000, 'krit');
         }
       }
 
       // Reifen zu heiß (Oberflächentemperatur)
-      const temp = d.reifenTemp;
-      if (temp) {
+      if (d.reifenTemp) {
         const namen = { FL: 'Vorne links', FR: 'Vorne rechts', RL: 'Hinten links', RR: 'Hinten rechts' };
         ['FL', 'FR', 'RL', 'RR'].forEach(pos => {
-          if (temp[pos] >= 130) {
-            rgMelde(namen[pos] + ' wird heiß, ' + temp[pos] + ' Grad. Etwas schonen.', 'rg-warn', 'heiss-' + pos, 40000);
+          if (d.reifenTemp[pos] >= 130) {
+            rgMelde(namen[pos] + ' wird heiß, ' + d.reifenTemp[pos] + ' Grad. Etwas schonen.', 'rg-warn', 'heiss-' + pos, 40000, 'info');
           }
         });
       }
 
-      // Sprit / Reichweite
-      if (d.fuelRemainingLaps != null) {
-        if (d.totalLaps && d.lapNum) {
-          const rest = d.totalLaps - d.lapNum;
-          if (rest > 0 && d.fuelRemainingLaps < rest - 0.5) {
-            rgMelde('Sprit knapp: Reichweite ' + komma(d.fuelRemainingLaps, 1) + ' Runden, noch ' + rest + ' zu fahren. Bitte sparen.', 'rg-warn', 'sprit', 45000);
-          }
-        } else if (d.fuelRemainingLaps < 2) {
-          rgMelde('Sprit fast leer, Reichweite unter zwei Runden.', 'rg-krit', 'sprit', 45000);
+      // Sprit-Sparziel (konkret statt nur "niedrig")
+      if (d.fuelRemainingLaps != null && d.totalLaps && d.lapNum) {
+        const rest = d.totalLaps - d.lapNum;
+        const defizit = rest - d.fuelRemainingLaps;
+        if (rest > 0 && defizit > 0.3) {
+          const proz = Math.min(20, Math.round((defizit / rest) * 100));
+          rgMelde('Sprit knapp: ' + komma(defizit, 1) + ' Runden Defizit. Etwa ' + proz +
+                  ' Prozent sparen – später bremsen, heben und rollen.', 'rg-warn', 'sprit', 45000, 'krit');
         }
+      } else if (d.fuelRemainingLaps != null && d.fuelRemainingLaps < 2) {
+        rgMelde('Sprit fast leer, Reichweite unter zwei Runden.', 'rg-krit', 'sprit', 45000, 'krit');
       }
     }
 
@@ -455,7 +570,8 @@
       b.classList.toggle('btn-grau', !RG.sprache);
       if (RG.sprache) {
         rgLadeStimme();
-        rgSprich('Funk aktiv. Renningenieur bereit.');
+        RG.lastSpeakAt = 0;
+        rgSprich('Funk aktiv. Renningenieur bereit.', 'krit');
       } else if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
