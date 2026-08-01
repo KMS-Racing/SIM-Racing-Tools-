@@ -275,7 +275,22 @@
       <div class="reihe">
         <div>
           <label for="strecke">Strecke</label>
-          <input id="strecke" type="text" placeholder="z.B. Monza" />
+          <input id="strecke" type="text" list="strecke-vorschlaege" placeholder="z.B. Monza" />
+          <datalist id="strecke-vorschlaege">
+            <option value="Bahrain"></option><option value="Jeddah"></option>
+            <option value="Melbourne"></option><option value="Suzuka"></option>
+            <option value="Shanghai"></option><option value="Miami"></option>
+            <option value="Imola"></option><option value="Monaco"></option>
+            <option value="Montreal"></option><option value="Barcelona"></option>
+            <option value="Spielberg"></option><option value="Silverstone"></option>
+            <option value="Budapest"></option><option value="Spa-Francorchamps"></option>
+            <option value="Zandvoort"></option><option value="Monza"></option>
+            <option value="Baku"></option><option value="Singapur"></option>
+            <option value="Austin"></option><option value="Mexiko-Stadt"></option>
+            <option value="Interlagos"></option><option value="Las Vegas"></option>
+            <option value="Losail"></option><option value="Abu Dhabi"></option>
+            <option value="Nürburgring"></option><option value="Portimão"></option>
+          </datalist>
         </div>
         <div>
           <label for="auto">Auto / Team</label>
@@ -316,7 +331,8 @@
       <h2 style="letter-spacing:0.2em;">Meine Rennen</h2>
       <div class="werkzeuge">
         <button class="btn-grau" id="vergleich-btn" title="Zwei Rennen vergleichen">⇄ Vergleich</button>
-        <button class="btn-grau" id="export-btn" title="Alle Rennen als Datei sichern">⬇︎ Backup</button>
+        <button class="btn-grau" id="export-btn" title="Alle Rennen als JSON-Datei sichern">⬇︎ Backup</button>
+        <button class="btn-grau" id="csv-btn" title="Alle Runden als CSV (für Excel)">⬇︎ CSV</button>
         <button class="btn-grau" id="import-btn" title="Rennen aus einer Backup-Datei laden">⬆︎ Import</button>
         <input type="file" id="import-datei" accept="application/json,.json" hidden />
       </div>
@@ -325,8 +341,12 @@
     <!-- Gesamt-Übersicht über alle Rennen -->
     <div id="uebersicht"></div>
 
+    <!-- Persönliche Bestzeiten pro Strecke -->
+    <div id="bestzeiten"></div>
+
     <!-- Filter & Sortierung -->
     <div id="filterbar" class="filterbar" style="display:none">
+      <input id="f-suche" class="f-select" type="search" placeholder="🔍 Suche (Strecke, Auto, Notiz)" />
       <select id="f-spiel" class="f-select" data-alle="Alle Spiele"><option value="">Alle Spiele</option></select>
       <select id="f-strecke" class="f-select" data-alle="Alle Strecken"><option value="">Alle Strecken</option></select>
       <select id="f-sort" class="f-select">
@@ -481,7 +501,12 @@
       const varianz = runden.reduce((a, b) => a + (b - schnitt) ** 2, 0) / runden.length;
       const schwankung = Math.sqrt(varianz); // in Millisekunden
 
-      return { beste, schnitt, schwankung };
+      // Median = die "mittlere" Runde (robust gegen einzelne Ausreißer)
+      const sortiert = [...runden].sort((a, b) => a - b);
+      const mitte = Math.floor(sortiert.length / 2);
+      const median = sortiert.length % 2 ? sortiert[mitte] : (sortiert[mitte - 1] + sortiert[mitte]) / 2;
+
+      return { beste, schnitt, schwankung, median };
     }
 
     // Aus der Schwankung (in ms) eine verständliche Bewertung machen
@@ -690,6 +715,7 @@
           '</div>' +
           '<div class="kopf-knoepfe">' +
             '<button class="bearbeiten">bearbeiten</button>' +
+            '<button class="duplizieren">duplizieren</button>' +
             '<button class="loeschen">löschen</button>' +
           '</div>' +
         '</div>' +
@@ -697,6 +723,7 @@
         '<div class="stats">' +
           '<div class="stat"><div class="wert" style="color:#3fb950">' + msZuZeit(stat.beste) + '</div><div class="name">Beste Runde</div></div>' +
           '<div class="stat"><div class="wert">' + msZuZeit(stat.schnitt) + '</div><div class="name">Durchschnitt</div></div>' +
+          '<div class="stat"><div class="wert">' + msZuZeit(stat.median) + '</div><div class="name">Median</div></div>' +
           '<div class="stat"><div class="wert">±' + (stat.schwankung / 1000).toFixed(3) + 's</div><div class="name">Schwankung</div></div>' +
         '</div>' +
         '<div>Konstanz: <span class="badge ' + bewertung.klasse + '">' + bewertung.text + '</span></div>' +
@@ -712,6 +739,16 @@
         '</details>';
 
       karte.querySelector('.bearbeiten').addEventListener('click', () => bearbeiteRennen(rennen.id));
+
+      karte.querySelector('.duplizieren').addEventListener('click', () => {
+        const alle = ladeRennen();
+        const kopie = JSON.parse(JSON.stringify(rennen));
+        kopie.id = Date.now();
+        kopie.notiz = (kopie.notiz ? kopie.notiz + ' ' : '') + '(Kopie)';
+        alle.push(kopie);
+        speichereRennen(alle);
+        zeigeAlleRennen();
+      });
 
       karte.querySelector('.loeschen').addEventListener('click', () => {
         if (confirm('Dieses Rennen wirklich löschen?')) {
@@ -744,6 +781,34 @@
         '</div>';
     }
 
+    // Persönliche Bestzeit je Strecke
+    function renderBestzeiten(alle) {
+      const proStrecke = {};
+      alle.forEach(r => {
+        if (!r.strecke) return;
+        const best = Math.min(...r.runden);
+        if (!proStrecke[r.strecke] || best < proStrecke[r.strecke].best) {
+          proStrecke[r.strecke] = { best, spiel: r.spiel || '' };
+        }
+        proStrecke[r.strecke].anzahl = (proStrecke[r.strecke].anzahl || 0) + 1;
+      });
+      const strecken = Object.keys(proStrecke).sort();
+      if (strecken.length === 0) { $('bestzeiten').innerHTML = ''; return; }
+
+      $('bestzeiten').innerHTML =
+        '<div class="karte">' +
+          '<h2>Bestzeiten pro Strecke</h2>' +
+          '<table class="v-tabelle">' +
+            '<tr><th>Strecke</th><th>Bestzeit</th><th>Rennen</th></tr>' +
+            strecken.map(s =>
+              '<tr><td style="color:var(--text)">' + escape(s) + '</td>' +
+              '<td style="color:#3fb950">' + msZuZeit(proStrecke[s].best) + '</td>' +
+              '<td>' + proStrecke[s].anzahl + '</td></tr>'
+            ).join('') +
+          '</table>' +
+        '</div>';
+    }
+
     // Füllt die Filter-Auswahllisten (Auswahl bleibt erhalten)
     function fuelleFilter(alle, feldId, werte) {
       const sel = $(feldId);
@@ -761,12 +826,14 @@
 
       if (alle.length === 0) {
         $('uebersicht').innerHTML = '';
+        $('bestzeiten').innerHTML = '';
         $('filterbar').style.display = 'none';
         container.innerHTML = '<div class="karte leer">Noch keine Rennen gespeichert.<br>Trag oben dein erstes Rennen ein! 🏎️</div>';
         return;
       }
 
       renderUebersicht(alle);
+      renderBestzeiten(alle);
       $('filterbar').style.display = 'flex';
       fuelleFilter(alle, 'f-spiel', alle.map(r => r.spiel));
       fuelleFilter(alle, 'f-strecke', alle.map(r => r.strecke));
@@ -774,8 +841,16 @@
       // Filtern
       const fSpiel = $('f-spiel').value;
       const fStrecke = $('f-strecke').value;
-      let liste = alle.filter(r =>
-        (!fSpiel || r.spiel === fSpiel) && (!fStrecke || r.strecke === fStrecke));
+      const fSuche = $('f-suche').value.trim().toLowerCase();
+      let liste = alle.filter(r => {
+        if (fSpiel && r.spiel !== fSpiel) return false;
+        if (fStrecke && r.strecke !== fStrecke) return false;
+        if (fSuche) {
+          const text = ((r.strecke || '') + ' ' + (r.auto || '') + ' ' + (r.notiz || '') + ' ' + (r.spiel || '')).toLowerCase();
+          if (!text.includes(fSuche)) return false;
+        }
+        return true;
+      });
 
       // Sortieren
       const sort = $('f-sort').value;
@@ -882,6 +957,28 @@
       URL.revokeObjectURL(url);
     }
 
+    // Exportiert alle Runden als CSV (eine Zeile pro Runde) – für Excel & Co.
+    function csvExport() {
+      const rennen = ladeRennen();
+      if (rennen.length === 0) { alert('Noch keine Rennen zum Exportieren da.'); return; }
+      const kopf = ['Datum', 'Spiel', 'Strecke', 'Auto', 'Runde', 'Zeit'];
+      const zeilen = [kopf.join(';')];
+      const sauber = (t) => '"' + String(t || '').replace(/"/g, '""') + '"';
+      rennen.forEach(r => {
+        r.runden.forEach((ms, i) => {
+          zeilen.push([sauber(r.datum), sauber(r.spiel), sauber(r.strecke), sauber(r.auto), (i + 1), msZuZeit(ms)].join(';'));
+        });
+      });
+      // BOM voranstellen, damit Excel Umlaute korrekt anzeigt
+      const blob = new Blob(['﻿' + zeilen.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'renn-tagebuch-' + new Date().toISOString().slice(0, 10) + '.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     // Liest eine Backup-Datei ein und fügt neue Rennen hinzu (ohne Duplikate)
     function importiere(datei) {
       const leser = new FileReader();
@@ -979,6 +1076,7 @@
     // Filter & Sortierung: bei Änderung neu anzeigen
     ['f-spiel', 'f-strecke', 'f-sort'].forEach(id =>
       $(id).addEventListener('change', zeigeAlleRennen));
+    $('f-suche').addEventListener('input', zeigeAlleRennen);
 
     // Vergleich
     $('vergleich-btn').addEventListener('click', vergleichUmschalten);
@@ -987,6 +1085,7 @@
 
     // Backup: herunterladen / einlesen
     $('export-btn').addEventListener('click', exportiere);
+    $('csv-btn').addEventListener('click', csvExport);
     $('import-btn').addEventListener('click', () => $('import-datei').click());
     $('import-datei').addEventListener('change', (e) => {
       if (e.target.files && e.target.files[0]) importiere(e.target.files[0]);
