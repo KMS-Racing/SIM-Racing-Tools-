@@ -905,6 +905,11 @@
     $('rennen-speichern').addEventListener('click', rennenSpeichern);
     $('bearbeiten-abbrechen').addEventListener('click', formularZuruecksetzen);
 
+    // Escape bricht den Bearbeiten-Modus ab
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && bearbeiteId !== null) formularZuruecksetzen();
+    });
+
     // Enter im Runden-Feld = Runde hinzufügen
     $('runde').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); rundeHinzufuegen(); }
