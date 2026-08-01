@@ -9,7 +9,11 @@ Eintippen der Rundenzeiten. Wertet automatisch aus:
 - **Beste Runde & Durchschnitt**
 - **Konstanz** – wie gleichmäßig du gefahren bist
 - **Reifen-Abbau** – ob die Zeiten im Rennverlauf langsamer werden
-- kleines **Verlaufs-Diagramm** der Runden
+- **Verlaufs-Diagramm** der Runden + aufklappbare Liste aller Rundenzeiten
+- **Gesamt-Übersicht** (Anzahl Rennen, Runden, Strecken, absolute Bestzeit)
+- **Filter & Sortierung** nach Spiel/Strecke, sortiert nach Datum oder Zeit
+- **Rennen vergleichen** – zwei Rennen überlagern (Tabelle + Diagramm)
+- **Bearbeiten** – Rennen nachträglich ändern
 - **Mehrere Zeiten** auf einmal einfügen (aus einem Zeitenblatt kopieren)
 - **Backup & Import** – alle Rennen als Datei sichern und wieder laden
 
@@ -24,7 +28,9 @@ Reifen-Abbau-Analyse.
 
 Dazu ein **vorausschauender Renningenieur** mit Live-Ansagen (Text und
 optional gesprochen): Live-Delta zur Bestrunde, Boxenstopp-Fenster,
-Abbau-Kosten, Sprit-Sparziel und Stint-Zusammenfassung.
+Abbau-Kosten, Sprit-Sparziel und Stint-Zusammenfassung. Dazu eine
+Runden-Historie und der Knopf **„Session sichern"**, der die gefahrenen
+Runden als Datei exportiert, die das Renn-Tagebuch direkt importieren kann.
 
 Läuft lokal über ein kleines Node.js-Programm (ohne Zusatzpakete).
 Anleitung siehe [`f1-live/README.md`](f1-live/README.md).
