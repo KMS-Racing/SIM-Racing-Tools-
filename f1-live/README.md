@@ -8,6 +8,10 @@ letzte/beste Runde, welche Reifen du hast, die **Abnutzung pro Reifen in %**,
 Reifen-Temperaturen, Sprit + Reichweite – und wertet automatisch **Konstanz**
 und **Reifen-Abbau** deiner Runden aus.
 
+Dazu ein **vorausschauender Renningenieur** mit Live-Ansagen (Text und
+optional gesprochen): Live-Delta zur Bestrunde, Boxenstopp-Fenster,
+Abbau-Kosten, Sprit-Sparziel, Stint-Zusammenfassung.
+
 Läuft komplett lokal auf deinem PC. Es werden **keine Zusatz-Pakete** gebraucht,
 nur Node.js.
 
@@ -46,7 +50,19 @@ Im Spiel:
 
 ---
 
-## 3. Starten
+## 🎮 Erstmal ohne Spiel ausprobieren (Demo-Modus)
+Willst du das Dashboard einfach mal in Aktion sehen, ohne F1 zu starten?
+
+```
+node server.js --demo
+```
+Dann **http://localhost:3000** öffnen – es läuft eine simulierte Fahrt mit
+Rundenzeiten, Reifenverschleiß, Sprit und allen Renningenieur-Ansagen.
+Ideal zum Angucken und um „🔊 Funk an" zu testen.
+
+---
+
+## 3. Starten (mit echtem Spiel)
 Im Ordner `f1-live/` ein Terminal öffnen und:
 
 ```

@@ -586,7 +586,7 @@
         const d = JSON.parse(e.data);
         if (d.packetFormat) {
           if (d.gameYear) $('titel').textContent = '🏁 F1 ' + d.gameYear + ' · Live';
-          status.textContent = 'Live · Format ' + d.packetFormat;
+          status.textContent = d.demo ? '🎮 DEMO – simulierte Fahrt' : 'Live · Format ' + d.packetFormat;
           status.className = 'status live';
         } else {
           status.textContent = 'Verbunden – warte auf Daten aus F1 25 …';
