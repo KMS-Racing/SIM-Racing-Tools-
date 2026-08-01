@@ -291,7 +291,17 @@
         <input id="runde" type="text" placeholder="1:23.456" />
         <button class="btn-grau" id="runde-hinzu">+ Runde</button>
       </div>
-      <div class="hinweis">Format: Minuten:Sekunden.Millisekunden – Enter fügt hinzu. Mehrere Zeiten? Einfach reinkopieren (eine pro Zeile oder durch Leerzeichen getrennt).</div>
+      <div class="hinweis">Format: Minuten:Sekunden.Millisekunden – Enter fügt hinzu. Oder gleich einen ganzen Block einfügen ↓</div>
+
+      <button type="button" class="btn-grau" id="bulk-toggle" style="font-size:0.75rem; padding:0.4rem 0.7rem; margin-bottom:0.75rem">📋 Mehrere Zeiten einfügen</button>
+      <div id="bulk-panel" style="display:none">
+        <textarea id="bulk-text" placeholder="Zeiten hier reinkopieren – egal ob saubere Liste oder ganze Ergebnis-Tabelle mit anderem Text. Beispiel:&#10;1:23.456&#10;1:23.900&#10;1:24.100"></textarea>
+        <div id="bulk-vorschau" class="hinweis"></div>
+        <div class="speicher-reihe" style="margin-bottom:1rem">
+          <button class="btn-rot" id="bulk-uebernehmen">Übernehmen</button>
+          <button class="btn-grau" id="bulk-abbrechen">Abbrechen</button>
+        </div>
+      </div>
 
       <div id="runden-liste"></div>
 
@@ -425,6 +435,14 @@
       neue.forEach(ms => aktuelleRunden.push(ms));
       zeigeAktuelleRunden();
       return true;
+    }
+
+    // Findet Rundenzeiten IRGENDWO in einem Text (auch in einer Ergebnis-Tabelle
+    // mit anderem Text/Zahlen drumherum). Bevorzugt m:ss.mmm; sonst reine Sekunden.
+    function extrahiereZeiten(text) {
+      let treffer = text.match(/\d{1,2}:\d{1,2}[.,]\d{1,3}/g) || [];
+      if (treffer.length === 0) treffer = text.match(/\d{1,3}[.,]\d{2,3}/g) || [];
+      return treffer.map(zeitZuMs).filter(ms => ms !== null && ms > 0);
     }
 
     // Zeichnet die kleinen Runden-Chips unter dem Eingabefeld
@@ -922,6 +940,34 @@
         e.preventDefault();
         if (rundenEinfuegen(text)) $('runde').value = '';
       }
+    });
+
+    // Panel "Mehrere Zeiten einfügen"
+    $('bulk-toggle').addEventListener('click', () => {
+      const p = $('bulk-panel');
+      const zeigen = p.style.display === 'none';
+      p.style.display = zeigen ? 'block' : 'none';
+      if (zeigen) $('bulk-text').focus();
+    });
+    $('bulk-text').addEventListener('input', () => {
+      const z = extrahiereZeiten($('bulk-text').value);
+      $('bulk-vorschau').textContent = z.length === 0
+        ? 'Noch keine Zeiten erkannt.'
+        : z.length + ' Zeiten erkannt: ' + z.slice(0, 6).map(msZuZeit).join(', ') + (z.length > 6 ? ' …' : '');
+    });
+    $('bulk-uebernehmen').addEventListener('click', () => {
+      const z = extrahiereZeiten($('bulk-text').value);
+      if (z.length === 0) { alert('Keine gültigen Zeiten erkannt.'); return; }
+      z.forEach(ms => aktuelleRunden.push(ms));
+      zeigeAktuelleRunden();
+      $('bulk-text').value = '';
+      $('bulk-vorschau').textContent = '';
+      $('bulk-panel').style.display = 'none';
+    });
+    $('bulk-abbrechen').addEventListener('click', () => {
+      $('bulk-text').value = '';
+      $('bulk-vorschau').textContent = '';
+      $('bulk-panel').style.display = 'none';
     });
 
     // Filter & Sortierung: bei Änderung neu anzeigen
