@@ -176,6 +176,7 @@
       <div id="analyse-inhalt">
         <div class="hinweis">Sobald du die erste Runde fertig hast, erscheint hier deine Konstanz und der Reifen-Abbau.</div>
       </div>
+      <button class="btn-grau" id="session-save" style="margin-top:1rem">💾 Session als Renn-Tagebuch-Datei sichern</button>
     </div>
 
   </div>
@@ -264,7 +265,10 @@
       bar.style.background = p < 25 ? 'var(--gruen)' : p < 50 ? 'var(--gelb)' : 'var(--rot)';
     }
 
+    let letzteDaten = {};   // zuletzt empfangene Daten (für "Session sichern")
+
     function aktualisiere(d) {
+      letzteDaten = d;
       // Live-Rundenzeit + Kopf
       $('live-lap').textContent = msZuZeit(d.currentLapMs);
       $('lap-num').textContent  = d.lapNum ?? '–';
@@ -576,6 +580,32 @@
         window.speechSynthesis.cancel();
       }
     });
+
+    // ---------- Session ins Renn-Tagebuch übernehmen ----------
+    // Speichert die gefahrenen Runden als Datei, die im Renn-Tagebuch
+    // über "Import" eingelesen werden kann.
+    function sessionSpeichern() {
+      const runden = (letzteDaten.fertigeRunden || []).slice();
+      if (runden.length === 0) { alert('Noch keine fertigen Runden in dieser Session.'); return; }
+      const strecke = (prompt('Strecke? (optional)', '') || '').trim();
+      const auto    = (prompt('Auto / Team? (optional)', '') || '').trim();
+      const rennen = [{
+        id: Date.now(),
+        spiel: letzteDaten.gameYear ? 'F1 ' + letzteDaten.gameYear : 'F1',
+        strecke, auto,
+        datum: new Date().toISOString().slice(0, 10),
+        notiz: 'Aus Live-Session' + (letzteDaten.demo ? ' (Demo)' : ''),
+        runden: runden
+      }];
+      const blob = new Blob([JSON.stringify(rennen, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'session-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    $('session-save').addEventListener('click', sessionSpeichern);
 
     // ---------- Verbindung zum Server (SSE) ----------
     const status = $('status');
