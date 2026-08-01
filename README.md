@@ -1,7 +1,7 @@
 # 🏁 Sim-Racing-Tools
 
 Kleine Werkzeuge fürs Sim Racing – gebaut für F1 25/26 & Co.
-Zwei Teile:
+Plus ein KI-Lernprojekt zum Ausprobieren. Die Teile:
 
 ## 📓 Renn-Tagebuch (`renn-tagebuch/`)
 Eine Web-App zum Festhalten deiner Rennen (Spiel, Strecke, Auto, Notiz) und
@@ -30,6 +30,16 @@ node server.js
 ```
 Dann im Browser **http://localhost:3000** öffnen (Telemetrie in F1 25/26 muss
 aktiviert sein – Details im f1-live-README).
+
+## 🧠 KI-Ausbruch (`ki-ausbruch/`)
+Ein KI-Lernprojekt: In einem Labyrinth treten drei Lern-Methoden
+(**Q-Learning**, **SARSA**, **Monte-Carlo**) gegeneinander an. Keine kennt
+die Karte – sie lernen den Weg nur durch **Belohnungen** und dürfen sich
+dabei verirren. Man schaut ihnen live beim Lernen zu (Lernkurve, Neugier,
+Rangliste) und kann jede Methode für genauere Statistiken anklicken.
+Drei Labyrinthe: leicht / mittel / schwer.
+
+Einfach `ki-ausbruch/index.html` im Browser öffnen – keine Installation nötig.
 
 ---
 
