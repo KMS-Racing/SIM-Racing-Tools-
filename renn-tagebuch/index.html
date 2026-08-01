@@ -205,6 +205,7 @@
       letter-spacing: 0.05em;
       margin-bottom: 0.35rem;
     }
+    .typ-tag { background: rgba(74,158,255,0.15); color: #4a9eff; }
     .rennen-notiz { font-size: 0.85rem; color: #bbb; font-style: italic; margin: 0.5rem 0; }
 
     .kopf-knoepfe { display: flex; gap: 0.5rem; flex-shrink: 0; }
@@ -265,6 +266,15 @@
             <option value="Le Mans Ultimate"></option>
             <option value="Automobilista 2"></option>
           </datalist>
+        </div>
+        <div>
+          <label for="art">Art</label>
+          <select id="art" class="f-select" style="width:100%; margin-bottom:1rem">
+            <option value="">–</option>
+            <option value="Training">Training</option>
+            <option value="Qualifying">Qualifying</option>
+            <option value="Rennen">Rennen</option>
+          </select>
         </div>
         <div>
           <label for="datum">Datum</label>
@@ -347,6 +357,12 @@
     <!-- Filter & Sortierung -->
     <div id="filterbar" class="filterbar" style="display:none">
       <input id="f-suche" class="f-select" type="search" placeholder="🔍 Suche (Strecke, Auto, Notiz)" />
+      <select id="f-typ" class="f-select">
+        <option value="">Alle Arten</option>
+        <option value="Training">Training</option>
+        <option value="Qualifying">Qualifying</option>
+        <option value="Rennen">Rennen</option>
+      </select>
       <select id="f-spiel" class="f-select" data-alle="Alle Spiele"><option value="">Alle Spiele</option></select>
       <select id="f-strecke" class="f-select" data-alle="Alle Strecken"><option value="">Alle Strecken</option></select>
       <select id="f-sort" class="f-select">
@@ -624,6 +640,7 @@
 
     function rennenSpeichern() {
       const spiel   = $('spiel').value.trim();
+      const typ     = $('art').value;
       const strecke = $('strecke').value.trim();
       const auto    = $('auto').value.trim();
       const datum   = $('datum').value;
@@ -637,10 +654,10 @@
       if (bearbeiteId !== null) {
         // Bestehendes Rennen aktualisieren (id bleibt gleich)
         const r = alle.find(x => x.id === bearbeiteId);
-        if (r) { r.spiel = spiel; r.strecke = strecke; r.auto = auto; r.datum = datum; r.notiz = notiz; r.runden = aktuelleRunden.slice(); }
+        if (r) { r.spiel = spiel; r.typ = typ; r.strecke = strecke; r.auto = auto; r.datum = datum; r.notiz = notiz; r.runden = aktuelleRunden.slice(); }
       } else {
         // Neues Rennen anlegen
-        alle.push({ id: Date.now(), spiel, strecke, auto, datum, notiz, runden: aktuelleRunden.slice() });
+        alle.push({ id: Date.now(), spiel, typ, strecke, auto, datum, notiz, runden: aktuelleRunden.slice() });
       }
       speichereRennen(alle);
 
@@ -651,6 +668,7 @@
     // Leert das Formular und beendet einen eventuellen Bearbeiten-Modus
     function formularZuruecksetzen() {
       $('spiel').value = '';
+      $('art').value = '';
       $('strecke').value = '';
       $('auto').value = '';
       $('notiz').value = '';
@@ -668,6 +686,7 @@
       const r = ladeRennen().find(x => x.id === id);
       if (!r) return;
       $('spiel').value = r.spiel || '';
+      $('art').value = r.typ || '';
       $('strecke').value = r.strecke || '';
       $('auto').value = r.auto || '';
       $('datum').value = r.datum || '';
@@ -709,7 +728,8 @@
       karte.innerHTML =
         '<div class="rennen-kopf">' +
           '<div>' +
-            (rennen.spiel ? '<div class="spiel-tag">' + escape(rennen.spiel) + '</div>' : '') +
+            (rennen.spiel ? '<span class="spiel-tag">' + escape(rennen.spiel) + '</span> ' : '') +
+            (rennen.typ ? '<span class="spiel-tag typ-tag">' + escape(rennen.typ) + '</span>' : '') +
             '<div class="titel">' + escape(rennen.strecke) + (rennen.auto ? ' · ' + escape(rennen.auto) : '') + '</div>' +
             '<div class="datum">' + (rennen.datum || '') + ' · ' + rennen.runden.length + ' Runden</div>' +
           '</div>' +
@@ -842,9 +862,11 @@
       const fSpiel = $('f-spiel').value;
       const fStrecke = $('f-strecke').value;
       const fSuche = $('f-suche').value.trim().toLowerCase();
+      const fTyp = $('f-typ').value;
       let liste = alle.filter(r => {
         if (fSpiel && r.spiel !== fSpiel) return false;
         if (fStrecke && r.strecke !== fStrecke) return false;
+        if (fTyp && r.typ !== fTyp) return false;
         if (fSuche) {
           const text = ((r.strecke || '') + ' ' + (r.auto || '') + ' ' + (r.notiz || '') + ' ' + (r.spiel || '')).toLowerCase();
           if (!text.includes(fSuche)) return false;
@@ -961,12 +983,12 @@
     function csvExport() {
       const rennen = ladeRennen();
       if (rennen.length === 0) { alert('Noch keine Rennen zum Exportieren da.'); return; }
-      const kopf = ['Datum', 'Spiel', 'Strecke', 'Auto', 'Runde', 'Zeit'];
+      const kopf = ['Datum', 'Spiel', 'Art', 'Strecke', 'Auto', 'Runde', 'Zeit'];
       const zeilen = [kopf.join(';')];
       const sauber = (t) => '"' + String(t || '').replace(/"/g, '""') + '"';
       rennen.forEach(r => {
         r.runden.forEach((ms, i) => {
-          zeilen.push([sauber(r.datum), sauber(r.spiel), sauber(r.strecke), sauber(r.auto), (i + 1), msZuZeit(ms)].join(';'));
+          zeilen.push([sauber(r.datum), sauber(r.spiel), sauber(r.typ), sauber(r.strecke), sauber(r.auto), (i + 1), msZuZeit(ms)].join(';'));
         });
       });
       // BOM voranstellen, damit Excel Umlaute korrekt anzeigt
@@ -1074,7 +1096,7 @@
     });
 
     // Filter & Sortierung: bei Änderung neu anzeigen
-    ['f-spiel', 'f-strecke', 'f-sort'].forEach(id =>
+    ['f-spiel', 'f-strecke', 'f-sort', 'f-typ'].forEach(id =>
       $(id).addEventListener('change', zeigeAlleRennen));
     $('f-suche').addEventListener('input', zeigeAlleRennen);
 

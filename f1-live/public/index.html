@@ -211,6 +211,14 @@
       <div id="analyse-inhalt">
         <div class="hinweis">Sobald du die erste Runde fertig hast, erscheint hier deine Konstanz und der Reifen-Abbau.</div>
       </div>
+      <div class="tb-reihe" style="margin-bottom:0.5rem">
+        <span style="font-size:0.75rem; color:var(--grau)">Session-Typ:</span>
+        <select id="session-typ" style="background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px">
+          <option>Training</option>
+          <option>Qualifying</option>
+          <option>Rennen</option>
+        </select>
+      </div>
       <div class="tb-reihe">
         <button class="btn-grau" id="auto-tagebuch">🔄 Auto ins Tagebuch: aus</button>
         <a class="btn-grau tb-link" id="tagebuch-link" href="/tagebuch" target="_blank" rel="noopener">Tagebuch öffnen ↗</a>
@@ -836,6 +844,7 @@
       const rennen = [{
         id: Date.now(),
         spiel: letzteDaten.gameYear ? 'F1 ' + letzteDaten.gameYear : 'F1',
+        typ: $('session-typ').value,
         strecke, auto,
         datum: new Date().toISOString().slice(0, 10),
         notiz: 'Aus Live-Session' + (letzteDaten.demo ? ' (Demo)' : ''),
@@ -883,6 +892,7 @@
           alle.push(r);
         }
         r.spiel = letzteDaten.gameYear ? 'F1 ' + letzteDaten.gameYear : (r.spiel || 'F1');
+        r.typ = $('session-typ').value;
         r.runden = runden.slice();
         localStorage.setItem('rennTagebuch', JSON.stringify(alle));
       } catch (e) { /* Speicher blockiert – dann eben nicht */ }
