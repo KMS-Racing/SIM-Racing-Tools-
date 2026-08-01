@@ -158,6 +158,15 @@ if (DEMO) {
 // HTTP: Dashboard ausliefern + Live-Stream (SSE)
 // --------------------------------------------------------------
 const server = http.createServer((req, res) => {
+  // Neue Session: gesammelte Runden verwerfen
+  if (req.url === '/reset') {
+    fertigeRunden.length = 0;
+    letzteRundenNr = null;
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+
   if (req.url === '/stream') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',

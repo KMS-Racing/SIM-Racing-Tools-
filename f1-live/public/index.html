@@ -151,11 +151,22 @@
       <h2>🧑‍🔧 Renningenieur</h2>
       <div class="rg-kopf">
         <button id="rg-funk" class="btn-grau">🔇 Funk aus</button>
-        <span class="rg-hinweis">Ansagen erscheinen hier. „Funk" liest sie zusätzlich laut vor.</span>
+        <input id="zielzeit" type="text" placeholder="🎯 Zielzeit z.B. 1:23.500"
+               style="width:auto; flex:1; min-width:150px; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px" />
       </div>
+      <div class="rg-hinweis" style="margin-bottom:0.9rem">Ansagen erscheinen unten. „Funk" liest sie laut vor. Zielzeit vergleicht jede Runde.</div>
       <div id="rg-feed" class="rg-feed">
         <div class="rg-leer">Sobald du fährst, meldet sich der Renningenieur.</div>
       </div>
+      <details style="margin-top:0.9rem">
+        <summary style="cursor:pointer; color:var(--grau); font-size:0.8rem">⚙️ Schwellen einstellen</summary>
+        <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:0.7rem; align-items:flex-end">
+          <label style="font-size:0.7rem; color:var(--grau)">Reifen heiß ab (°C)<br>
+            <input id="s-heiss" type="number" value="130" style="width:90px; margin-top:0.25rem; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; padding:0.35rem; border-radius:6px" /></label>
+          <label style="font-size:0.7rem; color:var(--grau)">Reifen kritisch ab (%)<br>
+            <input id="s-kritisch" type="number" value="85" style="width:90px; margin-top:0.25rem; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; padding:0.35rem; border-radius:6px" /></label>
+        </div>
+      </details>
     </div>
 
     <!-- Kennzahlen -->
@@ -200,6 +211,7 @@
         <button class="btn-grau" id="auto-tagebuch">🔄 Auto ins Tagebuch: aus</button>
         <a class="btn-grau tb-link" id="tagebuch-link" href="/tagebuch" target="_blank" rel="noopener">Tagebuch öffnen ↗</a>
         <button class="btn-grau" id="session-save">💾 Als Datei</button>
+        <button class="btn-grau" id="neue-session">🆕 Neue Session</button>
       </div>
       <div style="margin-top:0.6rem; font-size:0.75rem; color:var(--grau); line-height:1.4">„Auto" schreibt deine Runden direkt ins Tagebuch – öffne es über den Link oben, dann füllt es sich live.</div>
     </div>
@@ -217,6 +229,19 @@
       const sek = (g - min * 60).toFixed(3).padStart(6, '0');
       return min + ':' + sek;
     }
+
+    // Wandelt "1:23.500" (oder "83.5") in Millisekunden um (null bei ungültig)
+    function zeitTextZuMs(text) {
+      text = (text || '').trim().replace(',', '.');
+      if (!text) return null;
+      let m = 0, s = 0;
+      if (text.includes(':')) { const t = text.split(':'); m = parseInt(t[0], 10); s = parseFloat(t[1]); }
+      else s = parseFloat(text);
+      if (isNaN(m) || isNaN(s)) return null;
+      return Math.round((m * 60 + s) * 1000);
+    }
+
+    let zielMs = null;  // optionale Zielzeit für den Rundenvergleich
 
     // ---------- Analyse (wie im Renn-Tagebuch) ----------
     function berechneStatistik(r) {
@@ -282,7 +307,15 @@
     function setzeReifen(pos, wear, temp) {
       const w = (wear == null) ? null : wear;
       $('wear-' + pos).textContent = (w == null) ? '–' : w.toFixed(1) + '%';
-      $('temp-' + pos).textContent = (temp == null) ? '– °C' : temp + ' °C';
+
+      // Temperatur mit Farbe je nach Fenster: kalt (blau) / optimal (grün) / heiß (rot)
+      const tempEl = $('temp-' + pos);
+      tempEl.textContent = (temp == null) ? '– °C' : temp + ' °C';
+      if (temp == null)     tempEl.style.color = 'var(--grau)';
+      else if (temp < 80)   tempEl.style.color = 'var(--blau)';
+      else if (temp <= 110) tempEl.style.color = 'var(--gruen)';
+      else                  tempEl.style.color = 'var(--rot)';
+
       const bar = $('bar-' + pos);
       const p = Math.max(0, Math.min(100, w == null ? 0 : w));
       bar.style.width = p + '%';
@@ -291,7 +324,7 @@
     }
 
     let letzteDaten = {};        // zuletzt empfangene Daten (für "Session sichern")
-    const sessionId = Date.now(); // feste ID dieser Session (für Auto-Speichern)
+    let sessionId = Date.now();  // ID dieser Session (für Auto-Speichern; neu bei "Neue Session")
     let autoTagebuch = false;     // schreibt Runden automatisch ins Tagebuch
     let autoPrevCount = -1;       // um neue Runden zu erkennen
 
@@ -387,6 +420,7 @@
       lastPushDist: null,  // letzter Trace-Stützpunkt
       stintStartCount: 0,  // ab welcher Runde der aktuelle Reifensatz läuft
       lastSpeakAt: 0,      // Zeitpunkt der letzten gesprochenen Ansage
+      schwellen: { heiss: 130, kritisch: 85 },  // einstellbare Warn-Schwellen
     };
 
     const WEAR_LIMIT = 100;  // Reifen bei 100 % "runter"
@@ -545,6 +579,13 @@
         }
         RG.lastBestMs = best;
 
+        // Vergleich mit der Zielzeit (falls gesetzt)
+        if (zielMs) {
+          const diff = (letzte - zielMs) / 1000;
+          if (diff <= 0) rgMelde('Zielzeit geknackt! ' + komma(Math.abs(diff), 2) + ' Sekunden drunter.', 'rg-gut', null, 0, 'info');
+          else rgMelde('Runde ' + komma(diff, 2) + ' Sekunden über Zielzeit.', 'rg-warn', null, 0, 'info');
+        }
+
         // Konstanz der letzten drei Runden
         if (runden.length >= 3) {
           const l3 = runden.slice(-3);
@@ -558,7 +599,7 @@
         if (d.reifenAbnutzung) {
           const mw = Math.max(d.reifenAbnutzung.FL, d.reifenAbnutzung.FR, d.reifenAbnutzung.RL, d.reifenAbnutzung.RR);
           const rate = wearRatePerLap(RG.wearHistory);
-          if (rate > 0.3 && mw < 85) {
+          if (rate > 0.3 && mw < RG.schwellen.kritisch) {
             const restReifen = Math.max(0, Math.floor((WEAR_LIMIT - mw) / rate));
             let text = 'Reifen bei ' + Math.round(mw) + ' Prozent, ' + komma(rate, 1) +
                        ' Prozent pro Runde. Halten noch etwa ' + restReifen + ' Runden.';
@@ -585,7 +626,7 @@
       // Reifen kritisch -> sofort, höchste Priorität
       if (d.reifenAbnutzung) {
         const mw = Math.max(d.reifenAbnutzung.FL, d.reifenAbnutzung.FR, d.reifenAbnutzung.RL, d.reifenAbnutzung.RR);
-        if (mw >= 85) {
+        if (mw >= RG.schwellen.kritisch) {
           rgMelde('Reifen kritisch bei ' + Math.round(mw) + ' Prozent. Rein zur Box!', 'rg-krit', 'pit', 25000, 'krit');
         }
       }
@@ -594,7 +635,7 @@
       if (d.reifenTemp) {
         const namen = { FL: 'Vorne links', FR: 'Vorne rechts', RL: 'Hinten links', RR: 'Hinten rechts' };
         ['FL', 'FR', 'RL', 'RR'].forEach(pos => {
-          if (d.reifenTemp[pos] >= 130) {
+          if (d.reifenTemp[pos] >= RG.schwellen.heiss) {
             rgMelde(namen[pos] + ' wird heiß, ' + d.reifenTemp[pos] + ' Grad. Etwas schonen.', 'rg-warn', 'heiss-' + pos, 40000, 'info');
           }
         });
@@ -641,6 +682,31 @@
       if (localStorage.getItem('f1FunkAn') === '1') { RG.sprache = true; rgLadeStimme(); rgFunkKnopf(); }
     } catch (e) {}
 
+    // Zielzeit übernehmen (wird bei jeder fertigen Runde verglichen)
+    $('zielzeit').addEventListener('input', () => { zielMs = zeitTextZuMs($('zielzeit').value); });
+
+    // Renningenieur-Schwellen: laden, anwenden, speichern
+    function schwellenLaden() {
+      try {
+        const s = JSON.parse(localStorage.getItem('f1Schwellen') || 'null');
+        if (s && s.heiss && s.kritisch) {
+          RG.schwellen = s;
+          $('s-heiss').value = s.heiss;
+          $('s-kritisch').value = s.kritisch;
+        }
+      } catch (e) {}
+    }
+    function schwellenSpeichern() {
+      const heiss = parseInt($('s-heiss').value, 10);
+      const kritisch = parseInt($('s-kritisch').value, 10);
+      if (!isNaN(heiss)) RG.schwellen.heiss = heiss;
+      if (!isNaN(kritisch)) RG.schwellen.kritisch = kritisch;
+      try { localStorage.setItem('f1Schwellen', JSON.stringify(RG.schwellen)); } catch (e) {}
+    }
+    $('s-heiss').addEventListener('change', schwellenSpeichern);
+    $('s-kritisch').addEventListener('change', schwellenSpeichern);
+    schwellenLaden();
+
     // ---------- Session ins Renn-Tagebuch übernehmen ----------
     // Speichert die gefahrenen Runden als Datei, die im Renn-Tagebuch
     // über "Import" eingelesen werden kann.
@@ -666,6 +732,22 @@
       URL.revokeObjectURL(url);
     }
     $('session-save').addEventListener('click', sessionSpeichern);
+
+    // Neue Session: Runden verwerfen (Server + Anzeige) und einen frischen
+    // Tagebuch-Eintrag beginnen (neue sessionId).
+    function neueSession() {
+      fetch('/reset').catch(() => {});
+      sessionId = Date.now();
+      autoPrevCount = -1;
+      RG.prevLapCount = 0; RG.lastBestMs = null; RG.wearHistory = [];
+      RG.bestLapMs = Infinity; RG.bestTrace = null; RG.currentTrace = [];
+      RG.lastDist = null; RG.lastPushDist = null; RG.stintStartCount = 0;
+      RG.lastReifen = null; RG.cooldowns = {};
+      $('rg-feed').innerHTML = '<div class="rg-leer">Neue Session – der Renningenieur meldet sich, sobald du fährst.</div>';
+      $('analyse-inhalt').innerHTML = '<div class="hinweis">Neue Session gestartet. Fahr los! 🏎️</div>';
+      $('live-delta').innerHTML = '';
+    }
+    $('neue-session').addEventListener('click', neueSession);
 
     // Schreibt/aktualisiert die aktuelle Session als EIN Rennen im Tagebuch
     // (gleicher Browser-Speicher, weil beide über localhost:3000 laufen).
