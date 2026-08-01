@@ -199,8 +199,11 @@
     }
     .rennen-notiz { font-size: 0.85rem; color: #bbb; font-style: italic; margin: 0.5rem 0; }
 
-    .loeschen { background: none; color: var(--grau); font-size: 0.75rem; padding: 0.2rem; }
+    .kopf-knoepfe { display: flex; gap: 0.5rem; flex-shrink: 0; }
+    .loeschen, .bearbeiten { background: none; color: var(--grau); font-size: 0.75rem; padding: 0.2rem; }
     .loeschen:hover { color: var(--rot); }
+    .bearbeiten:hover { color: var(--text); }
+    .speicher-reihe { display: flex; gap: 0.5rem; align-items: center; }
 
     /* Das Mini-Diagramm */
     svg { width: 100%; height: 120px; display: block; margin-top: 0.5rem; }
@@ -225,7 +228,7 @@
 
     <!-- ========== FORMULAR: Neues Rennen ========== -->
     <div class="karte">
-      <h2>Neues Rennen</h2>
+      <h2 id="formular-titel">Neues Rennen</h2>
 
       <div class="reihe">
         <div>
@@ -270,7 +273,10 @@
 
       <div id="runden-liste"></div>
 
-      <button class="btn-rot" id="rennen-speichern">Rennen speichern</button>
+      <div class="speicher-reihe">
+        <button class="btn-rot" id="rennen-speichern">Rennen speichern</button>
+        <button class="btn-grau" id="bearbeiten-abbrechen" style="display:none">Abbrechen</button>
+      </div>
     </div>
 
     <!-- ========== LISTE: Meine Rennen ========== -->
@@ -313,6 +319,7 @@
 
     // Hier sammeln wir die Runden, die gerade fürs neue Rennen eingetippt werden
     let aktuelleRunden = []; // Liste von Zeiten in Millisekunden
+    let bearbeiteId = null;  // wenn gesetzt: wir bearbeiten dieses Rennen (statt neu anzulegen)
 
     // ==========================================================
     // ZEIT UMWANDELN
@@ -549,26 +556,53 @@
       if (!strecke) { alert('Bitte eine Strecke eintragen.'); return; }
       if (aktuelleRunden.length === 0) { alert('Bitte mindestens eine Rundenzeit eintippen.'); return; }
 
-      const rennen = {
-        id: Date.now(), // eindeutige Nummer über die Zeit
-        spiel, strecke, auto, datum, notiz,
-        runden: aktuelleRunden.slice() // Kopie der Runden-Liste
-      };
-
       const alle = ladeRennen();
-      alle.push(rennen);
+
+      if (bearbeiteId !== null) {
+        // Bestehendes Rennen aktualisieren (id bleibt gleich)
+        const r = alle.find(x => x.id === bearbeiteId);
+        if (r) { r.spiel = spiel; r.strecke = strecke; r.auto = auto; r.datum = datum; r.notiz = notiz; r.runden = aktuelleRunden.slice(); }
+      } else {
+        // Neues Rennen anlegen
+        alle.push({ id: Date.now(), spiel, strecke, auto, datum, notiz, runden: aktuelleRunden.slice() });
+      }
       speichereRennen(alle);
 
-      // Formular zurücksetzen
+      formularZuruecksetzen();
+      zeigeAlleRennen();
+    }
+
+    // Leert das Formular und beendet einen eventuellen Bearbeiten-Modus
+    function formularZuruecksetzen() {
       $('spiel').value = '';
       $('strecke').value = '';
       $('auto').value = '';
       $('notiz').value = '';
       aktuelleRunden = [];
+      bearbeiteId = null;
+      $('formular-titel').textContent = 'Neues Rennen';
+      $('rennen-speichern').textContent = 'Rennen speichern';
+      $('bearbeiten-abbrechen').style.display = 'none';
       zeigeAktuelleRunden();
       setzeHeutigesDatum();
+    }
 
-      zeigeAlleRennen();
+    // Lädt ein Rennen ins Formular, um es zu bearbeiten
+    function bearbeiteRennen(id) {
+      const r = ladeRennen().find(x => x.id === id);
+      if (!r) return;
+      $('spiel').value = r.spiel || '';
+      $('strecke').value = r.strecke || '';
+      $('auto').value = r.auto || '';
+      $('datum').value = r.datum || '';
+      $('notiz').value = r.notiz || '';
+      aktuelleRunden = (r.runden || []).slice();
+      bearbeiteId = id;
+      $('formular-titel').textContent = 'Rennen bearbeiten';
+      $('rennen-speichern').textContent = 'Änderungen speichern';
+      $('bearbeiten-abbrechen').style.display = 'inline-block';
+      zeigeAktuelleRunden();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     // ==========================================================
@@ -603,7 +637,10 @@
             '<div class="titel">' + escape(rennen.strecke) + (rennen.auto ? ' · ' + escape(rennen.auto) : '') + '</div>' +
             '<div class="datum">' + (rennen.datum || '') + ' · ' + rennen.runden.length + ' Runden</div>' +
           '</div>' +
-          '<button class="loeschen">löschen</button>' +
+          '<div class="kopf-knoepfe">' +
+            '<button class="bearbeiten">bearbeiten</button>' +
+            '<button class="loeschen">löschen</button>' +
+          '</div>' +
         '</div>' +
         (rennen.notiz ? '<div class="rennen-notiz">„' + escape(rennen.notiz) + '"</div>' : '') +
         '<div class="stats">' +
@@ -614,6 +651,8 @@
         '<div>Konstanz: <span class="badge ' + bewertung.klasse + '">' + bewertung.text + '</span></div>' +
         abbauHtml +
         baueDiagramm(rennen.runden);
+
+      karte.querySelector('.bearbeiten').addEventListener('click', () => bearbeiteRennen(rennen.id));
 
       karte.querySelector('.loeschen').addEventListener('click', () => {
         if (confirm('Dieses Rennen wirklich löschen?')) {
@@ -761,6 +800,7 @@
     // Knöpfe mit Funktionen verbinden
     $('runde-hinzu').addEventListener('click', rundeHinzufuegen);
     $('rennen-speichern').addEventListener('click', rennenSpeichern);
+    $('bearbeiten-abbrechen').addEventListener('click', formularZuruecksetzen);
 
     // Enter im Runden-Feld = Runde hinzufügen
     $('runde').addEventListener('keydown', (e) => {
