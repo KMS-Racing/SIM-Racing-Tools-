@@ -928,6 +928,12 @@
       if (e.key === 'Escape' && bearbeiteId !== null) formularZuruecksetzen();
     });
 
+    // Live-Aktualisierung: wenn das F1-Dashboard (gleicher Speicher) neue
+    // Runden schreibt, sofort neu anzeigen – solange wir nicht gerade tippen.
+    window.addEventListener('storage', (e) => {
+      if (e.key === SPEICHER_SCHLUESSEL && bearbeiteId === null) zeigeAlleRennen();
+    });
+
     // Enter im Runden-Feld = Runde hinzufügen
     $('runde').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); rundeHinzufuegen(); }

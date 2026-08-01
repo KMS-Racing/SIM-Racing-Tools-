@@ -57,6 +57,8 @@
     button:focus-visible, a:focus-visible { outline: 2px solid var(--rot); outline-offset: 2px; }
     .btn-rot  { background: var(--rot); color: #0d0d0d; font-weight: bold; }
     .btn-grau { background: #2a2a2a;    color: var(--text); }
+    .tb-reihe { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; align-items: center; }
+    .tb-link { text-decoration: none; display: inline-block; padding: 0.55rem 1rem; border-radius: 6px; font-size: 0.85rem; }
 
     /* Große Live-Rundenzeit */
     .live-zeit { text-align: center; }
@@ -194,7 +196,12 @@
       <div id="analyse-inhalt">
         <div class="hinweis">Sobald du die erste Runde fertig hast, erscheint hier deine Konstanz und der Reifen-Abbau.</div>
       </div>
-      <button class="btn-grau" id="session-save" style="margin-top:1rem">💾 Session als Renn-Tagebuch-Datei sichern</button>
+      <div class="tb-reihe">
+        <button class="btn-grau" id="auto-tagebuch">🔄 Auto ins Tagebuch: aus</button>
+        <a class="btn-grau tb-link" id="tagebuch-link" href="/tagebuch" target="_blank" rel="noopener">Tagebuch öffnen ↗</a>
+        <button class="btn-grau" id="session-save">💾 Als Datei</button>
+      </div>
+      <div style="margin-top:0.6rem; font-size:0.75rem; color:var(--grau); line-height:1.4">„Auto" schreibt deine Runden direkt ins Tagebuch – öffne es über den Link oben, dann füllt es sich live.</div>
     </div>
 
   </div>
@@ -283,10 +290,17 @@
       bar.style.background = p < 25 ? 'var(--gruen)' : p < 50 ? 'var(--gelb)' : 'var(--rot)';
     }
 
-    let letzteDaten = {};   // zuletzt empfangene Daten (für "Session sichern")
+    let letzteDaten = {};        // zuletzt empfangene Daten (für "Session sichern")
+    const sessionId = Date.now(); // feste ID dieser Session (für Auto-Speichern)
+    let autoTagebuch = false;     // schreibt Runden automatisch ins Tagebuch
+    let autoPrevCount = -1;       // um neue Runden zu erkennen
 
     function aktualisiere(d) {
       letzteDaten = d;
+
+      // Auto ins Tagebuch: bei jeder neuen fertigen Runde speichern
+      const anzahl = (d.fertigeRunden || []).length;
+      if (anzahl !== autoPrevCount) { autoPrevCount = anzahl; autoInsTagebuch(); }
       // Live-Rundenzeit + Kopf
       $('live-lap').textContent = msZuZeit(d.currentLapMs);
       $('lap-num').textContent  = d.lapNum ?? '–';
@@ -652,6 +666,44 @@
       URL.revokeObjectURL(url);
     }
     $('session-save').addEventListener('click', sessionSpeichern);
+
+    // Schreibt/aktualisiert die aktuelle Session als EIN Rennen im Tagebuch
+    // (gleicher Browser-Speicher, weil beide über localhost:3000 laufen).
+    function autoInsTagebuch() {
+      if (!autoTagebuch) return;
+      const runden = (letzteDaten.fertigeRunden || []);
+      if (runden.length === 0) return;
+      try {
+        const alle = JSON.parse(localStorage.getItem('rennTagebuch') || '[]');
+        let r = alle.find(x => x.id === sessionId);
+        if (!r) {
+          r = { id: sessionId, spiel: '', strecke: '', auto: '',
+                datum: new Date().toISOString().slice(0, 10),
+                notiz: 'Live-Session' + (letzteDaten.demo ? ' (Demo)' : ''), runden: [] };
+          alle.push(r);
+        }
+        r.spiel = letzteDaten.gameYear ? 'F1 ' + letzteDaten.gameYear : (r.spiel || 'F1');
+        r.runden = runden.slice();
+        localStorage.setItem('rennTagebuch', JSON.stringify(alle));
+      } catch (e) { /* Speicher blockiert – dann eben nicht */ }
+    }
+
+    function autoTagebuchKnopf() {
+      const b = $('auto-tagebuch');
+      b.textContent = autoTagebuch ? '🔄 Auto ins Tagebuch: an' : '🔄 Auto ins Tagebuch: aus';
+      b.classList.toggle('btn-rot', autoTagebuch);
+      b.classList.toggle('btn-grau', !autoTagebuch);
+    }
+
+    $('auto-tagebuch').addEventListener('click', () => {
+      autoTagebuch = !autoTagebuch;
+      try { localStorage.setItem('f1AutoTagebuch', autoTagebuch ? '1' : '0'); } catch (e) {}
+      autoTagebuchKnopf();
+      if (autoTagebuch) autoInsTagebuch();  // aktuellen Stand sofort sichern
+    });
+
+    // gespeicherte Auto-Einstellung wiederherstellen
+    try { if (localStorage.getItem('f1AutoTagebuch') === '1') { autoTagebuch = true; autoTagebuchKnopf(); } } catch (e) {}
 
     // ---------- Verbindung zum Server (SSE) ----------
     const status = $('status');

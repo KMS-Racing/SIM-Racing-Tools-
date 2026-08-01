@@ -78,6 +78,18 @@ Du solltest sehen:
 Dann im Browser **http://localhost:3000** öffnen und ein Rennen / eine
 Trainingssession in F1 25 starten. Die Werte füllen sich live. 🏎️
 
+### Runden automatisch ins Renn-Tagebuch
+Der Server liefert auch das Renn-Tagebuch aus – unter
+**http://localhost:3000/tagebuch**. Weil beide Seiten dann über dieselbe
+Adresse laufen, teilen sie sich den Browser-Speicher:
+
+1. Im Dashboard **„🔄 Auto ins Tagebuch: an"** klicken.
+2. Über **„Tagebuch öffnen ↗"** das Tagebuch öffnen.
+
+Ab dann landet jede gefahrene Runde **automatisch** als Session-Rennen im
+Tagebuch – es aktualisiert sich sogar live, ohne Datei-Export/Import. Die
+Strecke kannst du im Tagebuch per „bearbeiten" nachtragen.
+
 ---
 
 ## 4. Wenn Werte komisch aussehen: Debug-Modus

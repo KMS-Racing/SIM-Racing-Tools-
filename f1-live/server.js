@@ -172,10 +172,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Alles andere: das Dashboard (index.html) ausliefern
-  const datei = path.join(__dirname, 'public', 'index.html');
+  // Renn-Tagebuch mit ausliefern – so teilen sich Dashboard und Tagebuch
+  // denselben Browser-Speicher (localhost:3000), und die Runden landen
+  // automatisch im Tagebuch.
+  const url = req.url.split('?')[0];
+  const datei = (url === '/tagebuch' || url === '/tagebuch/')
+    ? path.join(__dirname, '..', 'renn-tagebuch', 'index.html')
+    : path.join(__dirname, 'public', 'index.html');
+
   fs.readFile(datei, (err, inhalt) => {
-    if (err) { res.writeHead(500); res.end('Dashboard nicht gefunden'); return; }
+    if (err) { res.writeHead(500); res.end('Seite nicht gefunden'); return; }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(inhalt);
   });
@@ -183,6 +189,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(WEB_PORT, () => {
   console.log(`✅ Dashboard offen unter:  http://localhost:${WEB_PORT}`);
+  console.log(`✅ Renn-Tagebuch unter:    http://localhost:${WEB_PORT}/tagebuch`);
   if (DEMO)  console.log('🎮 DEMO-Modus an – simulierte Fahrt, kein Spiel nötig.');
   if (DEBUG) console.log('🔧 Debug-Modus an – zeigt empfangene Werte im Terminal.');
   console.log('   (Zum Beenden: Strg + C)');
