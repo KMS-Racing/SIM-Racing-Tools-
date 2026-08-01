@@ -90,6 +90,23 @@
     svg { width: 100%; height: 130px; display: block; margin-top: 0.75rem; }
 
     .hinweis { color: var(--grau); font-size: 0.8rem; text-align: center; padding: 1rem; }
+
+    /* Renningenieur */
+    .rg-kopf { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.9rem; flex-wrap: wrap; }
+    .rg-hinweis { font-size: 0.72rem; color: var(--grau); }
+    .rg-feed { display: flex; flex-direction: column; gap: 0.5rem; }
+    .rg-msg {
+      background: #0d0d0d; border: 1px solid var(--rand); border-left: 3px solid var(--grau);
+      border-radius: 6px; padding: 0.55rem 0.7rem; font-size: 0.9rem; line-height: 1.35;
+      animation: rg-rein 0.25s ease;
+    }
+    .rg-zeit { color: var(--grau); font-size: 0.7rem; margin-right: 0.4rem; font-variant-numeric: tabular-nums; }
+    .rg-gut  { border-left-color: var(--gruen); }
+    .rg-warn { border-left-color: var(--gelb); }
+    .rg-krit { border-left-color: var(--rot); }
+    .rg-leer { color: var(--grau); font-size: 0.85rem; text-align: center; padding: 0.5rem; }
+    @keyframes rg-rein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .rg-msg { animation: none; } }
   </style>
 </head>
 <body>
@@ -104,6 +121,18 @@
     <div class="karte live-zeit">
       <div class="gross" id="live-lap">–:––.–––</div>
       <div class="klein">Aktuelle Runde · Runde <span id="lap-num">–</span> · P<span id="pos">–</span></div>
+    </div>
+
+    <!-- Renningenieur (Live-Ansagen) -->
+    <div class="karte">
+      <h2>🧑‍🔧 Renningenieur</h2>
+      <div class="rg-kopf">
+        <button id="rg-funk" class="btn-grau">🔇 Funk aus</button>
+        <span class="rg-hinweis">Ansagen erscheinen hier. „Funk" liest sie zusätzlich laut vor.</span>
+      </div>
+      <div id="rg-feed" class="rg-feed">
+        <div class="rg-leer">Sobald du fährst, meldet sich der Renningenieur.</div>
+      </div>
     </div>
 
     <!-- Kennzahlen -->
@@ -277,7 +306,160 @@
         html += baueDiagramm(runden);
         $('analyse-inhalt').innerHTML = html;
       }
+
+      // Renningenieur bewertet die Live-Daten und gibt Ansagen aus
+      rgPruefe(d);
     }
+
+    // ==========================================================
+    // RENNINGENIEUR – Live-Ansagen (Text + optional Sprache)
+    // ==========================================================
+    const RG = {
+      sprache: false,     // Sprachausgabe an/aus (Text ist immer an)
+      stimme: null,       // gewählte deutsche Stimme
+      cooldowns: {},      // verhindert, dass dieselbe Ansage zu oft kommt
+      prevLapCount: 0,    // um eine frisch beendete Runde zu erkennen
+      lastBestMs: null,   // bisher beste Runde
+      lastReifen: null,   // um Reifenwechsel zu erkennen
+    };
+
+    // Schreibt eine Ansage in den Feed (und spricht sie, falls Funk an ist).
+    // key + cooldownMs sorgen dafür, dass Wiederholungen gebremst werden.
+    function rgMelde(text, klasse, key, cooldownMs) {
+      const jetzt = Date.now();
+      if (key && RG.cooldowns[key] && (jetzt - RG.cooldowns[key]) < cooldownMs) return;
+      if (key) RG.cooldowns[key] = jetzt;
+
+      const feed = $('rg-feed');
+      const leer = feed.querySelector('.rg-leer');
+      if (leer) leer.remove();
+
+      const el = document.createElement('div');
+      el.className = 'rg-msg ' + (klasse || '');
+      const zeit = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      el.innerHTML = '<span class="rg-zeit">' + zeit + '</span>' + text;
+      feed.prepend(el);
+      while (feed.children.length > 12) feed.removeChild(feed.lastChild);
+
+      if (RG.sprache) rgSprich(text);
+    }
+
+    // Liest einen Text laut vor (deutsche Browser-Stimme, komplett offline)
+    function rgSprich(text) {
+      if (!('speechSynthesis' in window)) return;
+      try {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'de-DE';
+        if (RG.stimme) u.voice = RG.stimme;
+        u.rate = 1.05;
+        window.speechSynthesis.speak(u);
+      } catch (e) { /* Sprachausgabe nicht verfügbar – dann eben nur Text */ }
+    }
+
+    function rgLadeStimme() {
+      if (!('speechSynthesis' in window)) return;
+      const stimmen = window.speechSynthesis.getVoices();
+      RG.stimme = stimmen.find(v => v.lang && v.lang.toLowerCase().startsWith('de')) || null;
+    }
+    if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = rgLadeStimme;
+
+    // kleine Helfer für deutsche Zahl-Ausgabe (Komma statt Punkt)
+    const komma = (zahl, stellen) => zahl.toFixed(stellen).replace('.', ',');
+
+    // Die eigentliche "Renningenieur-Logik": prüft Regeln und meldet.
+    function rgPruefe(d) {
+      // --- Reifenwechsel erkennen ---
+      if (d.reifen && d.reifen.name && d.reifen.name !== '—' && d.reifen.name !== RG.lastReifen) {
+        if (RG.lastReifen !== null) {
+          rgMelde('Frische Reifen: ' + d.reifen.name + '.', 'rg-gut', 'reifenwechsel', 5000);
+          ['abbau', 'pit', 'heiss-FL', 'heiss-FR', 'heiss-RL', 'heiss-RR'].forEach(k => delete RG.cooldowns[k]);
+        }
+        RG.lastReifen = d.reifen.name;
+      }
+
+      // --- Ereignisse bei jeder frisch beendeten Runde ---
+      const runden = d.fertigeRunden || [];
+      if (runden.length > RG.prevLapCount) {
+        RG.prevLapCount = runden.length;
+        const letzte = runden[runden.length - 1];
+        const best = Math.min(...runden);
+
+        // Neue Bestzeit
+        if (runden.length >= 2 && letzte === best && (RG.lastBestMs === null || best < RG.lastBestMs)) {
+          rgMelde('Neue Bestzeit! ' + msZuZeit(best) + '.', 'rg-gut', null, 0);
+        }
+        RG.lastBestMs = best;
+
+        // Reifen-Abbau (Trend über die Runden)
+        if (runden.length >= 3) {
+          const t = berechneTrend(runden);
+          const proRunde = t.slope / 1000;
+          if (proRunde > 0.05) {
+            rgMelde('Reifen bauen ab, plus ' + komma(proRunde, 2) + ' Sekunden pro Runde.', 'rg-warn', 'abbau', 45000);
+          }
+        }
+
+        // Konstanz der letzten drei Runden
+        if (runden.length >= 3) {
+          const letzte3 = runden.slice(-3);
+          const spread = (Math.max(...letzte3) - Math.min(...letzte3)) / 1000;
+          if (spread > 0.6) {
+            rgMelde('Wird unruhig, ' + komma(spread, 1) + ' Sekunden Streuung. Rhythmus finden.', 'rg-warn', 'konstanz', 30000);
+          }
+        }
+      }
+
+      // --- Dauer-Bedingungen (mit Cooldown gegen Spam) ---
+
+      // Reifen-Abnutzung / Boxenstopp
+      const w = d.reifenAbnutzung;
+      if (w) {
+        const maxWear = Math.max(w.FL, w.FR, w.RL, w.RR);
+        if (maxWear >= 85) {
+          rgMelde('Reifen kritisch bei ' + Math.round(maxWear) + ' Prozent. Rein zur Box!', 'rg-krit', 'pit', 30000);
+        } else if (maxWear >= 70) {
+          rgMelde('Reifen bei ' + Math.round(maxWear) + ' Prozent. Boxenstopp vorbereiten.', 'rg-warn', 'pit', 60000);
+        }
+      }
+
+      // Reifen zu heiß (Oberflächentemperatur)
+      const temp = d.reifenTemp;
+      if (temp) {
+        const namen = { FL: 'Vorne links', FR: 'Vorne rechts', RL: 'Hinten links', RR: 'Hinten rechts' };
+        ['FL', 'FR', 'RL', 'RR'].forEach(pos => {
+          if (temp[pos] >= 130) {
+            rgMelde(namen[pos] + ' wird heiß, ' + temp[pos] + ' Grad. Etwas schonen.', 'rg-warn', 'heiss-' + pos, 40000);
+          }
+        });
+      }
+
+      // Sprit / Reichweite
+      if (d.fuelRemainingLaps != null) {
+        if (d.totalLaps && d.lapNum) {
+          const rest = d.totalLaps - d.lapNum;
+          if (rest > 0 && d.fuelRemainingLaps < rest - 0.5) {
+            rgMelde('Sprit knapp: Reichweite ' + komma(d.fuelRemainingLaps, 1) + ' Runden, noch ' + rest + ' zu fahren. Bitte sparen.', 'rg-warn', 'sprit', 45000);
+          }
+        } else if (d.fuelRemainingLaps < 2) {
+          rgMelde('Sprit fast leer, Reichweite unter zwei Runden.', 'rg-krit', 'sprit', 45000);
+        }
+      }
+    }
+
+    // Funk-Knopf: Sprachausgabe an/aus (der Klick zählt als Freigabe fürs Vorlesen)
+    $('rg-funk').addEventListener('click', () => {
+      RG.sprache = !RG.sprache;
+      const b = $('rg-funk');
+      b.textContent = RG.sprache ? '🔊 Funk an' : '🔇 Funk aus';
+      b.classList.toggle('btn-rot', RG.sprache);
+      b.classList.toggle('btn-grau', !RG.sprache);
+      if (RG.sprache) {
+        rgLadeStimme();
+        rgSprich('Funk aktiv. Renningenieur bereit.');
+      } else if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    });
 
     // ---------- Verbindung zum Server (SSE) ----------
     const status = $('status');
