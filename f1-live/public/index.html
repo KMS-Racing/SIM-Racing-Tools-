@@ -151,11 +151,14 @@
       <h2>🧑‍🔧 Renningenieur</h2>
       <div class="rg-kopf">
         <button id="rg-funk" class="btn-grau">🔇 Funk aus</button>
-        <button id="rg-mic" class="btn-grau">🎤 Sprachbefehle: aus</button>
+        <button id="rg-mic" class="btn-grau">👂 Ohren: aus</button>
+        <button id="rg-ptt" class="btn-grau">🎙️ Reden (Taste T)</button>
+        <input id="wake-wort" type="text" value="Chef" title="Aktivierungswort (sein Name)"
+               style="width:110px; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px" />
         <input id="zielzeit" type="text" placeholder="🎯 Zielzeit z.B. 1:23.500"
-               style="width:auto; flex:1; min-width:150px; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px" />
+               style="width:auto; flex:1; min-width:140px; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px" />
       </div>
-      <div class="rg-hinweis" style="margin-bottom:0.9rem">Ansagen erscheinen unten. „Funk" liest sie laut vor. Zielzeit vergleicht jede Runde.</div>
+      <div class="rg-hinweis" style="margin-bottom:0.9rem">Er meldet sich von selbst. Zum <b>Fragen</b>: Taste <b>T</b> drücken – oder „Ohren" an und seinen Namen sagen (z.B. „Chef, wie sind die Reifen?").</div>
       <div id="rg-feed" class="rg-feed">
         <div class="rg-leer">Sobald du fährst, meldet sich der Renningenieur.</div>
       </div>
@@ -724,34 +727,80 @@
     }
 
     let erkennung = null, hoert = false;
+    let wakeWort = 'chef';   // Aktivierungswort (sein Name)
+    let pttBis = 0;          // Push-to-talk: bis wann eine direkte Frage gilt
     function micUnterstuetzt() { return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window; }
+
+    // Verarbeitet einen erkannten Satz – reagiert NUR bei Aktivierungswort
+    // oder aktiver Push-to-talk (sonst still, wie bei Siri).
+    function verarbeiteSprache(txt) {
+      const lower = txt.toLowerCase();
+      const ptt = Date.now() < pttBis;
+      let frage = null;
+      if (ptt) {
+        frage = txt;
+      } else {
+        const idx = lower.indexOf(wakeWort);
+        if (idx !== -1) frage = txt.slice(idx + wakeWort.length).replace(/^[\s,]+/, '').trim() || txt;
+      }
+      if (frage === null) return;   // kein Name, keine Taste -> ignorieren
+      pttBis = 0;
+      const antwort = rgAntwort(frage, letzteDaten);
+      rgMelde('🎤 „' + txt + '" → ' + antwort, '', null, 0, 'krit');
+    }
+
+    function starteErkennung() {
+      if (hoert || !micUnterstuetzt()) return;
+      RG.sprache = true; rgLadeStimme(); rgFunkKnopf();   // Antworten hörbar machen
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      erkennung = new SR();
+      erkennung.lang = 'de-DE';
+      erkennung.continuous = true;
+      erkennung.interimResults = false;
+      erkennung.onresult = (e) => verarbeiteSprache(e.results[e.results.length - 1][0].transcript.trim());
+      erkennung.onend = () => { if (hoert) { try { erkennung.start(); } catch (e) {} } };
+      try { erkennung.start(); hoert = true; micKnopf(); } catch (e) {}
+    }
+    function stoppeErkennung() {
+      hoert = false;
+      try { if (erkennung) erkennung.stop(); } catch (e) {}
+      micKnopf();
+    }
+    function micKnopf() {
+      const b = $('rg-mic');
+      b.textContent = hoert ? '👂 Ohren: an' : '👂 Ohren: aus';
+      b.classList.toggle('btn-rot', hoert);
+      b.classList.toggle('btn-grau', !hoert);
+    }
+
+    // "Ohren": Dauer-Zuhören für das Aktivierungswort an/aus
     $('rg-mic').addEventListener('click', () => {
       if (!micUnterstuetzt()) {
         rgMelde('Sprachbefehle brauchen Chrome oder Edge – dieser Browser kann es nicht.', 'rg-warn', null, 0, 'info');
         return;
       }
-      if (!hoert) {
-        RG.sprache = true; rgLadeStimme(); rgFunkKnopf();  // Antworten hörbar machen
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        erkennung = new SR();
-        erkennung.lang = 'de-DE';
-        erkennung.continuous = true;
-        erkennung.interimResults = false;
-        erkennung.onresult = (e) => {
-          const txt = e.results[e.results.length - 1][0].transcript.trim();
-          const antwort = rgAntwort(txt, letzteDaten);
-          rgMelde('🎤 „' + txt + '" → ' + antwort, '', null, 0, 'krit');
-        };
-        erkennung.onend = () => { if (hoert) { try { erkennung.start(); } catch (e) {} } };
-        try { erkennung.start(); hoert = true; } catch (e) {}
-      } else {
-        hoert = false;
-        try { erkennung.stop(); } catch (e) {}
+      if (hoert) stoppeErkennung(); else starteErkennung();
+    });
+
+    // Push-to-talk: einmal reden ohne Namen (Knopf oder Taste T)
+    function pttStart() {
+      if (!micUnterstuetzt()) {
+        rgMelde('Sprachbefehle brauchen Chrome oder Edge – dieser Browser kann es nicht.', 'rg-warn', null, 0, 'info');
+        return;
       }
-      const b = $('rg-mic');
-      b.textContent = hoert ? '🎤 Sprachbefehle: an' : '🎤 Sprachbefehle: aus';
-      b.classList.toggle('btn-rot', hoert);
-      b.classList.toggle('btn-grau', !hoert);
+      pttBis = Date.now() + 6000;
+      if (!hoert) starteErkennung();
+      rgMelde('🎙️ Ich höre …', '', 'ptt', 2500, 'info');
+    }
+    $('rg-ptt').addEventListener('click', pttStart);
+    document.addEventListener('keydown', (e) => {
+      const feld = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+      if (!feld && e.key && e.key.toLowerCase() === 't') pttStart();
+    });
+
+    // Aktivierungswort (Name) übernehmen
+    $('wake-wort').addEventListener('input', () => {
+      wakeWort = ($('wake-wort').value.trim().toLowerCase()) || 'chef';
     });
 
     // Renningenieur-Schwellen: laden, anwenden, speichern
