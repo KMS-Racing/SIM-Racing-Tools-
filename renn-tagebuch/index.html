@@ -68,6 +68,14 @@
     }
     .f-select:focus { outline: none; border-color: var(--rot); }
 
+    /* Vergleich */
+    .v-legende { display: flex; gap: 1.25rem; font-size: 0.85rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+    .v-punkt { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
+    .v-tabelle { width: 100%; border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    .v-tabelle th, .v-tabelle td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #1e1e1e; }
+    .v-tabelle th { color: var(--grau); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; }
+    .v-tabelle td:first-child { color: var(--grau); }
+
     /* Link-Karte zum F1 Live-Dashboard */
     .dashboard-karte { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .dashboard-titel { font-size: 0.95rem; color: var(--text); }
@@ -283,6 +291,7 @@
     <div class="listen-kopf">
       <h2 style="letter-spacing:0.2em;">Meine Rennen</h2>
       <div class="werkzeuge">
+        <button class="btn-grau" id="vergleich-btn" title="Zwei Rennen vergleichen">⇄ Vergleich</button>
         <button class="btn-grau" id="export-btn" title="Alle Rennen als Datei sichern">⬇︎ Backup</button>
         <button class="btn-grau" id="import-btn" title="Rennen aus einer Backup-Datei laden">⬆︎ Import</button>
         <input type="file" id="import-datei" accept="application/json,.json" hidden />
@@ -301,6 +310,16 @@
         <option value="alt">Älteste zuerst</option>
         <option value="best">Beste Zeit zuerst</option>
       </select>
+    </div>
+
+    <!-- Vergleich zweier Rennen -->
+    <div id="vergleich-karte" class="karte" style="display:none">
+      <h2>Zwei Rennen vergleichen</h2>
+      <div class="filterbar">
+        <select id="v-a" class="f-select"></select>
+        <select id="v-b" class="f-select"></select>
+      </div>
+      <div id="vergleich-inhalt"></div>
     </div>
 
     <div id="rennen-container"></div>
@@ -744,6 +763,68 @@
     }
 
     // ==========================================================
+    // VERGLEICH: zwei Rennen nebeneinander
+    // ==========================================================
+
+    function vergleichUmschalten() {
+      const karte = $('vergleich-karte');
+      const zeigen = karte.style.display === 'none';
+      karte.style.display = zeigen ? 'block' : 'none';
+      if (zeigen) {
+        const alle = ladeRennen();
+        const opt = (r) => '<option value="' + r.id + '">' + escape(r.strecke || '—') + (r.datum ? ' · ' + r.datum : '') + '</option>';
+        $('v-a').innerHTML = alle.map(opt).join('');
+        $('v-b').innerHTML = alle.map(opt).join('');
+        if (alle.length >= 2) { $('v-a').value = alle[alle.length - 1].id; $('v-b').value = alle[alle.length - 2].id; }
+        zeigeVergleich();
+      }
+    }
+
+    // Zeichnet zwei Rundenverläufe übereinander (A rot, B blau)
+    function baueVergleichDiagramm(rA, rB) {
+      const breite = 600, hoehe = 140, rand = 12;
+      const alleWerte = rA.concat(rB);
+      const min = Math.min(...alleWerte), max = Math.max(...alleWerte);
+      const spanne = (max - min) || 1;
+      const linie = (r, farbe) => {
+        const pts = r.map((v, i) => {
+          const x = rand + (r.length === 1 ? 0.5 : i / (r.length - 1)) * (breite - 2 * rand);
+          const y = rand + ((v - min) / spanne) * (hoehe - 2 * rand);
+          return x.toFixed(1) + ',' + y.toFixed(1);
+        }).join(' ');
+        return '<polyline points="' + pts + '" fill="none" stroke="' + farbe + '" stroke-width="1.5" opacity="0.85" />';
+      };
+      return '<svg viewBox="0 0 ' + breite + ' ' + hoehe + '" preserveAspectRatio="none">' +
+             linie(rA, '#ff5f57') + linie(rB, '#4a9eff') + '</svg>';
+    }
+
+    function zeigeVergleich() {
+      const alle = ladeRennen();
+      const a = alle.find(r => r.id === Number($('v-a').value));
+      const b = alle.find(r => r.id === Number($('v-b').value));
+      if (!a || !b) { $('vergleich-inhalt').innerHTML = '<div class="leer">Zwei Rennen auswählen.</div>'; return; }
+
+      const sa = berechneStatistik(a.runden), sb = berechneStatistik(b.runden);
+      const trend = (r) => r.runden.length >= 2 ? (berechneTrend(r.runden).slope / 1000) : 0;
+      const zeile = (name, va, vb) => '<tr><td>' + name + '</td><td>' + va + '</td><td>' + vb + '</td></tr>';
+
+      $('vergleich-inhalt').innerHTML =
+        '<div class="v-legende">' +
+          '<span><span class="v-punkt" style="background:#ff5f57"></span>A: ' + escape(a.strecke || '—') + '</span>' +
+          '<span><span class="v-punkt" style="background:#4a9eff"></span>B: ' + escape(b.strecke || '—') + '</span>' +
+        '</div>' +
+        '<table class="v-tabelle">' +
+          '<tr><th></th><th>A</th><th>B</th></tr>' +
+          zeile('Beste', msZuZeit(sa.beste), msZuZeit(sb.beste)) +
+          zeile('Durchschnitt', msZuZeit(sa.schnitt), msZuZeit(sb.schnitt)) +
+          zeile('Schwankung', '±' + (sa.schwankung / 1000).toFixed(3) + 's', '±' + (sb.schwankung / 1000).toFixed(3) + 's') +
+          zeile('Abbau (s/Rd)', trend(a).toFixed(3), trend(b).toFixed(3)) +
+          zeile('Runden', a.runden.length, b.runden.length) +
+        '</table>' +
+        baueVergleichDiagramm(a.runden, b.runden);
+    }
+
+    // ==========================================================
     // BACKUP: Export & Import (alle Rennen als Datei)
     // ==========================================================
 
@@ -819,6 +900,11 @@
     // Filter & Sortierung: bei Änderung neu anzeigen
     ['f-spiel', 'f-strecke', 'f-sort'].forEach(id =>
       $(id).addEventListener('change', zeigeAlleRennen));
+
+    // Vergleich
+    $('vergleich-btn').addEventListener('click', vergleichUmschalten);
+    $('v-a').addEventListener('change', zeigeVergleich);
+    $('v-b').addEventListener('change', zeigeVergleich);
 
     // Backup: herunterladen / einlesen
     $('export-btn').addEventListener('click', exportiere);
