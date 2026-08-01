@@ -57,6 +57,7 @@
     button:focus-visible, a:focus-visible { outline: 2px solid var(--rot); outline-offset: 2px; }
     .btn-rot  { background: var(--rot); color: #0d0d0d; font-weight: bold; }
     .btn-grau { background: #2a2a2a;    color: var(--text); }
+    .btn-blau { background: var(--blau); color: #0d0d0d; font-weight: bold; }
     .tb-reihe { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; align-items: center; }
     .tb-link { text-decoration: none; display: inline-block; padding: 0.55rem 1rem; border-radius: 6px; font-size: 0.85rem; }
 
@@ -126,6 +127,7 @@
     .rg-gut  { border-left-color: var(--gruen); }
     .rg-warn { border-left-color: var(--gelb); }
     .rg-krit { border-left-color: var(--rot); }
+    .rg-pro  { border-left-color: var(--blau); background: rgba(74,158,255,0.06); }
     .rg-leer { color: var(--grau); font-size: 0.85rem; text-align: center; padding: 0.5rem; }
     @keyframes rg-rein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .rg-msg { animation: none; } }
@@ -153,12 +155,18 @@
         <button id="rg-funk" class="btn-grau">🔇 Funk aus</button>
         <button id="rg-mic" class="btn-grau">👂 Ohren: aus</button>
         <button id="rg-ptt" class="btn-grau">🎙️ Reden (Taste T)</button>
+        <button id="chef-pro" class="btn-grau" title="Der echte KI-Renningenieur (Claude) antwortet">🧠 Chef PRO: aus</button>
         <input id="wake-wort" type="text" value="Chef" title="Aktivierungswort (sein Name)"
                style="width:110px; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px" />
         <input id="zielzeit" type="text" placeholder="🎯 Zielzeit z.B. 1:23.500"
                style="width:auto; flex:1; min-width:140px; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.8rem; padding:0.4rem 0.6rem; border-radius:6px" />
       </div>
-      <div class="rg-hinweis" style="margin-bottom:0.9rem">Er meldet sich von selbst. Zum <b>Fragen</b>: Taste <b>T</b> drücken – oder „Ohren" an und seinen Namen sagen (z.B. „Chef, wie sind die Reifen?").</div>
+      <div class="rg-hinweis" style="margin-bottom:0.9rem">Er meldet sich von selbst. Zum <b>Fragen</b>: Taste <b>T</b> drücken – oder „Ohren" an und seinen Namen sagen (z.B. „Chef, wie sind die Reifen?"). Mit <b>🧠 Chef PRO</b> antwortet der echte KI-Ingenieur (Claude) und sieht dabei deine Live-Daten.</div>
+      <div style="display:flex; gap:0.5rem; margin-bottom:0.9rem">
+        <input id="chef-text" type="text" placeholder="Chef fragen (tippen + Enter) …"
+               style="flex:1; min-width:0; margin:0; background:#0d0d0d; border:1px solid var(--rand); color:var(--text); font-family:inherit; font-size:0.85rem; padding:0.5rem 0.7rem; border-radius:6px" />
+        <button id="chef-senden" class="btn-grau" title="Frage senden">Fragen ➤</button>
+      </div>
       <div id="rg-feed" class="rg-feed">
         <div class="rg-leer">Sobald du fährst, meldet sich der Renningenieur.</div>
       </div>
@@ -753,9 +761,81 @@
       }
       if (frage === null) return;   // kein Name, keine Taste -> ignorieren
       pttBis = 0;
+      if (chefPro && chefBereit) { fragChefPro(frage); return; }   // echter KI-Ingenieur
       const antwort = rgAntwort(frage, letzteDaten);
       rgMelde('🎤 „' + txt + '" → ' + antwort, '', null, 0, 'krit');
     }
+
+    // ---------- Chef PRO: der echte KI-Renningenieur (Claude) ----------
+    let chefPro = false;     // an/aus
+    let chefBereit = false;  // Server hat einen API-Schlüssel?
+    let chefLaeuft = false;  // eine Frage ist gerade unterwegs
+
+    // Schickt die Frage samt Live-Daten an den Server -> Claude -> Antwort.
+    async function fragChefPro(frage) {
+      if (chefLaeuft) { rgMelde('Chef antwortet noch …', 'rg-warn', null, 0, 'info'); return; }
+      chefLaeuft = true;
+      rgMelde('🎤 „' + frage + '" → Chef denkt nach …', 'rg-pro', null, 0, 'info');
+      try {
+        const r = await fetch('/chef', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frage }),
+        });
+        const j = await r.json();
+        if (j.antwort) rgMelde('🧠 ' + j.antwort, 'rg-pro', null, 0, 'krit');
+        else rgMelde('Chef PRO: ' + (j.fehler || 'Fehler') + '.', 'rg-warn', null, 0, 'info');
+      } catch (e) {
+        rgMelde('Chef PRO nicht erreichbar – läuft der Server?', 'rg-warn', null, 0, 'info');
+      } finally {
+        chefLaeuft = false;
+      }
+    }
+
+    // Beim Start prüfen, ob ein Schlüssel gesetzt ist
+    fetch('/chef-status')
+      .then(r => r.json())
+      .then(s => { chefBereit = !!s.bereit; chefKnopf(); })
+      .catch(() => {});
+
+    function chefKnopf() {
+      const b = $('chef-pro');
+      b.textContent = chefPro ? '🧠 Chef PRO: an' : '🧠 Chef PRO: aus';
+      b.classList.toggle('btn-blau', chefPro);
+      b.classList.toggle('btn-grau', !chefPro);
+      b.title = chefBereit
+        ? 'Der echte KI-Renningenieur (Claude) antwortet und sieht deine Live-Daten'
+        : 'Braucht deinen ANTHROPIC_API_KEY am Server (siehe f1-live/README.md)';
+    }
+
+    $('chef-pro').addEventListener('click', () => {
+      if (!chefBereit) {
+        rgMelde('Chef PRO braucht deinen eigenen Claude-Schlüssel. ANTHROPIC_API_KEY setzen und Server neu starten (Anleitung: f1-live/README.md).', 'rg-warn', null, 0, 'info');
+        return;
+      }
+      chefPro = !chefPro;
+      chefKnopf();
+      if (chefPro) {
+        RG.sprache = true; rgLadeStimme(); rgFunkKnopf();   // Antworten hörbar machen
+        rgMelde('🧠 Chef PRO an – jetzt antwortet der echte KI-Ingenieur und sieht deine Daten.', 'rg-pro', null, 0, 'krit');
+      } else {
+        rgMelde('Chef PRO aus – zurück zum schnellen Standard-Ingenieur.', '', null, 0, 'info');
+      }
+    });
+
+    // Frage tippen (funktioniert in jedem Browser, auch ohne Mikrofon)
+    function chefTextSenden() {
+      const feld = $('chef-text');
+      const frage = feld.value.trim();
+      if (!frage) return;
+      feld.value = '';
+      // Getippte Fragen gehen an den echten KI-Ingenieur, wenn ein Schlüssel
+      // da ist – sonst beantwortet der schnelle Standard-Ingenieur direkt.
+      if (chefBereit) fragChefPro(frage);
+      else { const a = rgAntwort(frage, letzteDaten); rgMelde('⌨️ „' + frage + '" → ' + a, '', null, 0, 'info'); }
+    }
+    $('chef-senden').addEventListener('click', chefTextSenden);
+    $('chef-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') chefTextSenden(); });
 
     function starteErkennung() {
       if (hoert || !micUnterstuetzt()) return;

@@ -33,6 +33,12 @@ Abbau-Kosten, Sprit-Sparziel, Stint-Zusammenfassung und Vergleich mit einer
 **Zielzeit**. Die Warn-Schwellen (Reifen heiß/kritisch) sind einstellbar.
 Reifen-Temperaturen sind nach Fenster farbig (kalt/optimal/heiß).
 
+Optional gibt es **🧠 Chef PRO** – einen *echten KI-Renningenieur* (Claude):
+du redest mit ihm wie mit einer Person (tippen oder per Sprache), und er sieht
+dabei deine Live-Telemetrie und gibt echte Strategie. Braucht deinen eigenen
+Claude-API-Schlüssel; der bleibt lokal auf deinem PC. Anleitung in
+[`f1-live/README.md`](f1-live/README.md).
+
 Runden landen per **„🔄 Auto ins Tagebuch"** automatisch im Renn-Tagebuch
 (unter `http://localhost:3000/tagebuch`), oder per **„Session sichern"** als
 Datei. **„Neue Session"** startet ein frisches Rennen.

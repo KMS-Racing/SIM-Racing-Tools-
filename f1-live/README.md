@@ -12,6 +12,11 @@ Dazu ein **vorausschauender Renningenieur** mit Live-Ansagen (Text und
 optional gesprochen): Live-Delta zur Bestrunde, Boxenstopp-Fenster,
 Abbau-Kosten, Sprit-Sparziel, Stint-Zusammenfassung.
 
+Und – wenn du willst – **🧠 Chef PRO**: ein *echter KI-Renningenieur* (Claude),
+mit dem du wie mit einer Person redest. Er sieht dabei deine Live-Telemetrie
+und gibt dir echte Strategie. Optional, braucht deinen eigenen Schlüssel –
+[siehe unten](#5-chef-pro--der-echte-ki-renningenieur-optional).
+
 Läuft komplett lokal auf deinem PC. Es werden **keine Zusatz-Pakete** gebraucht,
 nur Node.js.
 
@@ -107,6 +112,48 @@ Format 2025 | Reifen Soft (Alter 3) | Abnutzung FL 12.4% FR 11.8% RL 9.2% RR 9.6
 Sehen die Zahlen plausibel aus (Reifen 0–100 %, Sprit ~0–110 kg, Runde als
 sinnvolle Zeit), passt alles. Falls nicht, sag Bescheid – dann justieren wir
 eine Kleinigkeit im Parser.
+
+---
+
+## 5. Chef PRO – der echte KI-Renningenieur (optional)
+Der normale Renningenieur rechnet mit festen Regeln direkt auf deinem PC –
+blitzschnell und ohne alles Weitere. **Chef PRO** geht einen Schritt weiter:
+Deine Frage geht zusammen mit einem Schnappschuss deiner Live-Daten (Reifen,
+Abnutzung, Temperaturen, Sprit, Runden, Position …) an **Claude** – die
+Antwort wird dir vorgelesen. So redest du praktisch **live mit einem echten
+KI-Ingenieur, der deine Telemetrie sieht**.
+
+Was du brauchst:
+
+1. Einen eigenen **Claude-API-Schlüssel** von
+   [console.anthropic.com](https://console.anthropic.com) (kostet nach
+   Verbrauch – meist nur Cent pro Frage).
+2. Den Schlüssel **vor dem Start** setzen. Dein Schlüssel bleibt dabei immer
+   auf deinem PC (der Server nutzt ihn, der Browser sieht ihn nie):
+
+   **Windows (Eingabeaufforderung):**
+   ```
+   set ANTHROPIC_API_KEY=sk-ant-dein-schluessel
+   node server.js
+   ```
+   **Mac / Linux:**
+   ```
+   ANTHROPIC_API_KEY=sk-ant-dein-schluessel node server.js
+   ```
+
+3. Im Dashboard **„🧠 Chef PRO"** anklicken. Dann fragst du ihn genauso wie
+   den normalen Ingenieur – per Taste **T** ins Mikrofon, mit „Ohren an" +
+   Name, oder du **tippst deine Frage** ins Feld „Chef fragen" (klappt in
+   jedem Browser, auch ohne Mikrofon).
+
+Gut zu wissen:
+- Ohne Schlüssel bleibt der Knopf grau – der normale Ingenieur läuft ganz
+  normal weiter. Chef PRO ist rein zusätzlich.
+- Standard-Modell ist `claude-opus-5`. Willst du ein anderes (z.B. schneller),
+  setz vor dem Start zusätzlich `CHEF_MODEL`, z.B.
+  `set CHEF_MODEL=claude-sonnet-5`.
+- Chef PRO braucht Internet und antwortet in ein paar Sekunden (er „denkt"
+  kurz). Die schnellen Reflex-Ansagen macht weiterhin der lokale Ingenieur.
 
 ---
 

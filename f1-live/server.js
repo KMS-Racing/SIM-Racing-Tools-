@@ -15,6 +15,7 @@
 
 const dgram = require('dgram');
 const http  = require('http');
+const https = require('https');
 const fs    = require('fs');
 const path  = require('path');
 const { parse } = require('./f1parser');
@@ -23,6 +24,13 @@ const UDP_PORT = 20777;   // Muss zum Port in den F1-25-Einstellungen passen
 const WEB_PORT = 3000;    // Hier öffnest du die App im Browser
 const DEBUG    = process.argv.includes('--debug');
 const DEMO     = process.argv.includes('--demo');   // simulierte Telemetrie ohne Spiel
+
+// "Chef PRO": der echte KI-Renningenieur (Claude).
+// Der Schlüssel bleibt HIER auf deinem PC (nie im Browser). Setze ihn vor dem
+// Start:  Windows:  set ANTHROPIC_API_KEY=sk-ant-...   dann  node server.js
+//         Mac/Linux: ANTHROPIC_API_KEY=sk-ant-... node server.js
+const API_KEY    = process.env.ANTHROPIC_API_KEY || '';
+const CHEF_MODEL = process.env.CHEF_MODEL || 'claude-opus-5';   // per CHEF_MODEL änderbar
 
 const zustand = {};          // aktueller Live-Zustand deines Autos
 let letzteRundenNr = null;   // um eine frisch beendete Runde zu erkennen
@@ -155,9 +163,124 @@ if (DEMO) {
 }
 
 // --------------------------------------------------------------
+// CHEF PRO – der echte KI-Renningenieur (Claude-API)
+// ---------------------------------------------------------------------
+//  Baut einen kompakten Schnappschuss deiner Telemetrie, schickt ihn mit
+//  deiner Frage an die Claude-API und gibt die Antwort zurück. So redest du
+//  praktisch live mit einem echten KI-Ingenieur, der deine Daten sieht.
+//  Ohne Zusatzpakete – nur das eingebaute "https" von Node.
+// --------------------------------------------------------------
+function schnappschuss() {
+  const r = zustand.reifenAbnutzung || {};
+  const t = zustand.reifenTemp || {};
+  const beste = fertigeRunden.length ? Math.min(...fertigeRunden) : null;
+  const s = (ms) => (ms == null ? null : +(ms / 1000).toFixed(3));
+  return {
+    spiel: zustand.gameYear ? 'F1 ' + zustand.gameYear : null,
+    reifen: zustand.reifen ? zustand.reifen.name : null,
+    reifenAlterRunden: zustand.reifenAlter ?? null,
+    abnutzungProzent: (r.FL != null) ? { FL: r.FL, FR: r.FR, RL: r.RL, RR: r.RR } : null,
+    reifenTempC: (t.FL != null) ? { FL: t.FL, FR: t.FR, RL: t.RL, RR: t.RR } : null,
+    spritKg: zustand.fuelInTank ?? null,
+    spritReichweiteRunden: zustand.fuelRemainingLaps ?? null,
+    aktuelleRunde: zustand.lapNum ?? null,
+    rennrunden: zustand.totalLaps ?? null,
+    position: zustand.position ?? null,
+    letzteRundeS: s(zustand.lastLapMs),
+    besteRundeS: s(beste),
+    letzteRundenS: fertigeRunden.slice(-8).map(s),
+    asphaltC: zustand.trackTemp ?? null,
+    luftC: zustand.airTemp ?? null,
+  };
+}
+
+const CHEF_SYSTEM =
+  'Du bist mein Renningenieur am Boxenfunk in einem F1-Rennen (Sim Racing, F1 25/26). ' +
+  'Du sprichst Deutsch, ruhig, knapp und konkret wie echter Boxenfunk, hoechstens ein bis zwei Saetze. ' +
+  'Du bekommst als JSON die aktuelle Telemetrie meines Autos. Nutze sie fuer echte Strategie: ' +
+  'Reifenverschleiss und Boxenstopp-Fenster, Sprit sparen oder pushen, Reifentemperaturen und Fenster, ' +
+  'Konstanz und Pace im Vergleich zur Bestrunde. Erfinde keine Zahlen, die nicht im JSON stehen; ' +
+  'fehlt etwas, sag es kurz. Keine Listen, keine Sonderzeichen, kein Markdown, nur gesprochener Text, ' +
+  'weil deine Antwort direkt vorgelesen wird. Duze mich.';
+
+// Fragt Claude und liefert die Antwort als Text (Promise).
+function frageClaude(frage) {
+  return new Promise((resolve, reject) => {
+    if (!API_KEY) { reject(new Error('kein API-Schluessel gesetzt')); return; }
+    const koerper = JSON.stringify({
+      model: CHEF_MODEL,
+      max_tokens: 300,
+      system: CHEF_SYSTEM,
+      messages: [{
+        role: 'user',
+        content: 'Aktuelle Telemetrie (JSON):\n' + JSON.stringify(schnappschuss()) +
+                 '\n\nMeine Frage: ' + frage,
+      }],
+    });
+    const anfrage = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-length': Buffer.byteLength(koerper),
+      },
+    }, (resp) => {
+      let body = '';
+      resp.on('data', (c) => body += c);
+      resp.on('end', () => {
+        try {
+          const j = JSON.parse(body);
+          if (j.error) { reject(new Error(j.error.message || 'API-Fehler')); return; }
+          const text = (j.content || [])
+            .filter(c => c.type === 'text').map(c => c.text).join(' ').trim();
+          resolve(text || 'Ich habe gerade keine Antwort.');
+        } catch (e) { reject(new Error('Antwort nicht lesbar')); }
+      });
+    });
+    anfrage.on('error', reject);
+    anfrage.write(koerper);
+    anfrage.end();
+  });
+}
+
+// --------------------------------------------------------------
 // HTTP: Dashboard ausliefern + Live-Stream (SSE)
 // --------------------------------------------------------------
 const server = http.createServer((req, res) => {
+  // Chef PRO: ist ein Schlüssel gesetzt? (Dashboard fragt beim Start)
+  if (req.url === '/chef-status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ bereit: !!API_KEY, modell: CHEF_MODEL }));
+    return;
+  }
+
+  // Chef PRO: Frage an den echten KI-Renningenieur (Claude)
+  if (req.url === '/chef' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 100000) req.destroy(); });
+    req.on('end', () => {
+      let frage = '';
+      try { frage = String((JSON.parse(body || '{}').frage) || '').slice(0, 500); } catch (e) {}
+      if (!frage.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ fehler: 'keine Frage' }));
+        return;
+      }
+      frageClaude(frage).then((antwort) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ antwort }));
+      }).catch((e) => {
+        if (DEBUG) console.error('Chef-Fehler:', e.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ fehler: e.message }));
+      });
+    });
+    return;
+  }
+
   // Neue Session: gesammelte Runden verwerfen
   if (req.url === '/reset') {
     fertigeRunden.length = 0;
@@ -201,5 +324,7 @@ server.listen(WEB_PORT, () => {
   console.log(`✅ Renn-Tagebuch unter:    http://localhost:${WEB_PORT}/tagebuch`);
   if (DEMO)  console.log('🎮 DEMO-Modus an – simulierte Fahrt, kein Spiel nötig.');
   if (DEBUG) console.log('🔧 Debug-Modus an – zeigt empfangene Werte im Terminal.');
+  if (API_KEY) console.log(`🧠 Chef PRO bereit (Modell ${CHEF_MODEL}) – echter KI-Renningenieur an.`);
+  else console.log('💡 Chef PRO aus. Für den echten KI-Ingenieur: ANTHROPIC_API_KEY setzen und neu starten.');
   console.log('   (Zum Beenden: Strg + C)');
 });
