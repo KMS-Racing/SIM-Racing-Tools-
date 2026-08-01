@@ -48,6 +48,16 @@
       color: var(--rot); margin-bottom: 1rem;
     }
 
+    /* Knöpfe */
+    button {
+      font-family: inherit; cursor: pointer; border: none; border-radius: 6px;
+      font-size: 0.85rem; letter-spacing: 0.03em; padding: 0.55rem 1rem; transition: filter 0.15s;
+    }
+    button:hover { filter: brightness(1.2); }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--rot); outline-offset: 2px; }
+    .btn-rot  { background: var(--rot); color: #0d0d0d; font-weight: bold; }
+    .btn-grau { background: #2a2a2a;    color: var(--text); }
+
     /* Große Live-Rundenzeit */
     .live-zeit { text-align: center; }
     .live-zeit .gross { font-size: 3rem; font-weight: bold; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
