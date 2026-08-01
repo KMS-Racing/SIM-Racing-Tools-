@@ -59,6 +59,15 @@
     .werkzeuge { display: flex; gap: 0.5rem; }
     .werkzeuge button { font-size: 0.75rem; padding: 0.4rem 0.7rem; }
 
+    /* Filter- und Sortierleiste */
+    .filterbar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .f-select {
+      flex: 1; min-width: 120px;
+      background: #0d0d0d; border: 1px solid var(--rand); color: var(--text);
+      font-family: inherit; font-size: 0.8rem; padding: 0.45rem 0.5rem; border-radius: 6px;
+    }
+    .f-select:focus { outline: none; border-color: var(--rot); }
+
     /* Link-Karte zum F1 Live-Dashboard */
     .dashboard-karte { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .dashboard-titel { font-size: 0.95rem; color: var(--text); }
@@ -273,6 +282,21 @@
         <input type="file" id="import-datei" accept="application/json,.json" hidden />
       </div>
     </div>
+
+    <!-- Gesamt-Übersicht über alle Rennen -->
+    <div id="uebersicht"></div>
+
+    <!-- Filter & Sortierung -->
+    <div id="filterbar" class="filterbar" style="display:none">
+      <select id="f-spiel" class="f-select" data-alle="Alle Spiele"><option value="">Alle Spiele</option></select>
+      <select id="f-strecke" class="f-select" data-alle="Alle Strecken"><option value="">Alle Strecken</option></select>
+      <select id="f-sort" class="f-select">
+        <option value="neu">Neueste zuerst</option>
+        <option value="alt">Älteste zuerst</option>
+        <option value="best">Beste Zeit zuerst</option>
+      </select>
+    </div>
+
     <div id="rennen-container"></div>
 
   </div>
@@ -551,68 +575,126 @@
     // ALLE RENNEN ANZEIGEN
     // ==========================================================
 
+    // Baut die Karte für EIN Rennen (inkl. Löschen-Knopf)
+    function baueRennKarte(rennen) {
+      const stat = berechneStatistik(rennen.runden);
+      const bewertung = konstanzBewertung(stat.schwankung);
+
+      // Reifen-Abbau nur berechnen, wenn es mindestens 2 Runden gibt
+      let abbauHtml = '';
+      if (rennen.runden.length >= 2) {
+        const trend = berechneTrend(rennen.runden);
+        const ab = abbauBewertung(trend.slope);
+        const proRunde = trend.slope / 1000;              // Sekunden pro Runde
+        const vorzeichen = proRunde >= 0 ? '+' : '';
+        abbauHtml =
+          '<div style="margin-top:0.4rem">Reifen-Abbau: ' +
+            '<span class="badge ' + ab.klasse + '">' + ab.text + '</span> ' +
+            '<span style="color:#888;font-size:0.8rem">' + vorzeichen + proRunde.toFixed(3) + ' s/Runde</span>' +
+          '</div>';
+      }
+
+      const karte = document.createElement('div');
+      karte.className = 'karte';
+      karte.innerHTML =
+        '<div class="rennen-kopf">' +
+          '<div>' +
+            (rennen.spiel ? '<div class="spiel-tag">' + escape(rennen.spiel) + '</div>' : '') +
+            '<div class="titel">' + escape(rennen.strecke) + (rennen.auto ? ' · ' + escape(rennen.auto) : '') + '</div>' +
+            '<div class="datum">' + (rennen.datum || '') + ' · ' + rennen.runden.length + ' Runden</div>' +
+          '</div>' +
+          '<button class="loeschen">löschen</button>' +
+        '</div>' +
+        (rennen.notiz ? '<div class="rennen-notiz">„' + escape(rennen.notiz) + '"</div>' : '') +
+        '<div class="stats">' +
+          '<div class="stat"><div class="wert" style="color:#3fb950">' + msZuZeit(stat.beste) + '</div><div class="name">Beste Runde</div></div>' +
+          '<div class="stat"><div class="wert">' + msZuZeit(stat.schnitt) + '</div><div class="name">Durchschnitt</div></div>' +
+          '<div class="stat"><div class="wert">±' + (stat.schwankung / 1000).toFixed(3) + 's</div><div class="name">Schwankung</div></div>' +
+        '</div>' +
+        '<div>Konstanz: <span class="badge ' + bewertung.klasse + '">' + bewertung.text + '</span></div>' +
+        abbauHtml +
+        baueDiagramm(rennen.runden);
+
+      karte.querySelector('.loeschen').addEventListener('click', () => {
+        if (confirm('Dieses Rennen wirklich löschen?')) {
+          speichereRennen(ladeRennen().filter(r => r.id !== rennen.id));
+          zeigeAlleRennen();
+        }
+      });
+      return karte;
+    }
+
+    // Baut die Gesamt-Übersicht über ALLE Rennen
+    function renderUebersicht(alle) {
+      const runial = alle.reduce((a, r) => a + r.runden.length, 0);
+      let besteMs = Infinity, besteStrecke = '';
+      alle.forEach(r => {
+        const b = Math.min(...r.runden);
+        if (b < besteMs) { besteMs = b; besteStrecke = r.strecke || ''; }
+      });
+      const strecken = new Set(alle.map(r => r.strecke).filter(Boolean)).size;
+
+      $('uebersicht').innerHTML =
+        '<div class="karte">' +
+          '<h2>Übersicht</h2>' +
+          '<div class="stats">' +
+            '<div class="stat"><div class="wert">' + alle.length + '</div><div class="name">Rennen</div></div>' +
+            '<div class="stat"><div class="wert">' + runial + '</div><div class="name">Runden gesamt</div></div>' +
+            '<div class="stat"><div class="wert">' + strecken + '</div><div class="name">Strecken</div></div>' +
+            '<div class="stat"><div class="wert" style="color:#3fb950">' + msZuZeit(besteMs) + '</div><div class="name">Beste' + (besteStrecke ? ' · ' + escape(besteStrecke) : '') + '</div></div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    // Füllt die Filter-Auswahllisten (Auswahl bleibt erhalten)
+    function fuelleFilter(alle, feldId, werte) {
+      const sel = $(feldId);
+      const vorher = sel.value;
+      const optionen = ['<option value="">' + sel.dataset.alle + '</option>']
+        .concat([...new Set(werte.filter(Boolean))].sort().map(w =>
+          '<option value="' + escape(w) + '">' + escape(w) + '</option>'));
+      sel.innerHTML = optionen.join('');
+      sel.value = vorher; // vorherige Auswahl wiederherstellen (falls noch vorhanden)
+    }
+
     function zeigeAlleRennen() {
       const container = $('rennen-container');
       const alle = ladeRennen();
 
       if (alle.length === 0) {
+        $('uebersicht').innerHTML = '';
+        $('filterbar').style.display = 'none';
         container.innerHTML = '<div class="karte leer">Noch keine Rennen gespeichert.<br>Trag oben dein erstes Rennen ein! 🏎️</div>';
         return;
       }
 
+      renderUebersicht(alle);
+      $('filterbar').style.display = 'flex';
+      fuelleFilter(alle, 'f-spiel', alle.map(r => r.spiel));
+      fuelleFilter(alle, 'f-strecke', alle.map(r => r.strecke));
+
+      // Filtern
+      const fSpiel = $('f-spiel').value;
+      const fStrecke = $('f-strecke').value;
+      let liste = alle.filter(r =>
+        (!fSpiel || r.spiel === fSpiel) && (!fStrecke || r.strecke === fStrecke));
+
+      // Sortieren
+      const sort = $('f-sort').value;
+      if (sort === 'best') {
+        liste.sort((a, b) => Math.min(...a.runden) - Math.min(...b.runden));
+      } else if (sort === 'alt') {
+        liste.sort((a, b) => a.id - b.id);
+      } else { // 'neu'
+        liste.sort((a, b) => b.id - a.id);
+      }
+
       container.innerHTML = '';
-
-      // Neuestes Rennen zuerst: Kopie umdrehen
-      alle.slice().reverse().forEach((rennen) => {
-        const stat = berechneStatistik(rennen.runden);
-        const bewertung = konstanzBewertung(stat.schwankung);
-
-        // Reifen-Abbau nur berechnen, wenn es mindestens 2 Runden gibt
-        let abbauHtml = '';
-        if (rennen.runden.length >= 2) {
-          const trend = berechneTrend(rennen.runden);
-          const ab = abbauBewertung(trend.slope);
-          const proRunde = trend.slope / 1000;              // Sekunden pro Runde
-          const vorzeichen = proRunde >= 0 ? '+' : '';
-          abbauHtml =
-            '<div style="margin-top:0.4rem">Reifen-Abbau: ' +
-              '<span class="badge ' + ab.klasse + '">' + ab.text + '</span> ' +
-              '<span style="color:#888;font-size:0.8rem">' + vorzeichen + proRunde.toFixed(3) + ' s/Runde</span>' +
-            '</div>';
-        }
-
-        const karte = document.createElement('div');
-        karte.className = 'karte';
-        karte.innerHTML =
-          '<div class="rennen-kopf">' +
-            '<div>' +
-              (rennen.spiel ? '<div class="spiel-tag">' + escape(rennen.spiel) + '</div>' : '') +
-              '<div class="titel">' + escape(rennen.strecke) + (rennen.auto ? ' · ' + escape(rennen.auto) : '') + '</div>' +
-              '<div class="datum">' + (rennen.datum || '') + ' · ' + rennen.runden.length + ' Runden</div>' +
-            '</div>' +
-            '<button class="loeschen">löschen</button>' +
-          '</div>' +
-          (rennen.notiz ? '<div class="rennen-notiz">„' + escape(rennen.notiz) + '"</div>' : '') +
-          '<div class="stats">' +
-            '<div class="stat"><div class="wert" style="color:#3fb950">' + msZuZeit(stat.beste) + '</div><div class="name">Beste Runde</div></div>' +
-            '<div class="stat"><div class="wert">' + msZuZeit(stat.schnitt) + '</div><div class="name">Durchschnitt</div></div>' +
-            '<div class="stat"><div class="wert">±' + (stat.schwankung / 1000).toFixed(3) + 's</div><div class="name">Schwankung</div></div>' +
-          '</div>' +
-          '<div>Konstanz: <span class="badge ' + bewertung.klasse + '">' + bewertung.text + '</span></div>' +
-          abbauHtml +
-          baueDiagramm(rennen.runden);
-
-        // Löschen-Knopf für genau dieses Rennen
-        karte.querySelector('.loeschen').addEventListener('click', () => {
-          if (confirm('Dieses Rennen wirklich löschen?')) {
-            const gefiltert = ladeRennen().filter(r => r.id !== rennen.id);
-            speichereRennen(gefiltert);
-            zeigeAlleRennen();
-          }
-        });
-
-        container.appendChild(karte);
-      });
+      if (liste.length === 0) {
+        container.innerHTML = '<div class="karte leer">Keine Rennen für diesen Filter.</div>';
+        return;
+      }
+      liste.forEach(rennen => container.appendChild(baueRennKarte(rennen)));
     }
 
     // Macht Text sicher fürs Einfügen in HTML (verhindert kaputte Anzeige)
@@ -693,6 +775,10 @@
         if (rundenEinfuegen(text)) $('runde').value = '';
       }
     });
+
+    // Filter & Sortierung: bei Änderung neu anzeigen
+    ['f-spiel', 'f-strecke', 'f-sort'].forEach(id =>
+      $(id).addEventListener('change', zeigeAlleRennen));
 
     // Backup: herunterladen / einlesen
     $('export-btn').addEventListener('click', exportiere);
