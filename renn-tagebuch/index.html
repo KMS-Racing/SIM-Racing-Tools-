@@ -54,6 +54,11 @@
     /* Alles bleibt schön mittig und wird auf großen Screens nicht zu breit */
     .spalte { width: 100%; max-width: 640px; }
 
+    /* Kopf der Rennen-Liste mit Backup/Import-Knöpfen */
+    .listen-kopf { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .werkzeuge { display: flex; gap: 0.5rem; }
+    .werkzeuge button { font-size: 0.75rem; padding: 0.4rem 0.7rem; }
+
     /* Link-Karte zum F1 Live-Dashboard */
     .dashboard-karte { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .dashboard-titel { font-size: 0.95rem; color: var(--text); }
@@ -252,7 +257,7 @@
         <input id="runde" type="text" placeholder="1:23.456" />
         <button class="btn-grau" id="runde-hinzu">+ Runde</button>
       </div>
-      <div class="hinweis">Format: Minuten:Sekunden.Millisekunden – Enter zählt auch als „hinzufügen".</div>
+      <div class="hinweis">Format: Minuten:Sekunden.Millisekunden – Enter fügt hinzu. Mehrere Zeiten? Einfach reinkopieren (eine pro Zeile oder durch Leerzeichen getrennt).</div>
 
       <div id="runden-liste"></div>
 
@@ -260,7 +265,14 @@
     </div>
 
     <!-- ========== LISTE: Meine Rennen ========== -->
-    <h2 style="letter-spacing:0.2em;">Meine Rennen</h2>
+    <div class="listen-kopf">
+      <h2 style="letter-spacing:0.2em;">Meine Rennen</h2>
+      <div class="werkzeuge">
+        <button class="btn-grau" id="export-btn" title="Alle Rennen als Datei sichern">⬇︎ Backup</button>
+        <button class="btn-grau" id="import-btn" title="Rennen aus einer Backup-Datei laden">⬆︎ Import</button>
+        <input type="file" id="import-datei" accept="application/json,.json" hidden />
+      </div>
+    </div>
     <div id="rennen-container"></div>
 
   </div>
@@ -328,6 +340,27 @@
       eingabe.value = '';
       eingabe.focus();
       zeigeAktuelleRunden();
+    }
+
+    // Wandelt einen kopierten Block (mehrere Zeiten) in eine Liste von ms um.
+    // Getrennt wird an Zeilenumbrüchen, Leerzeichen, Tabs und Semikolon –
+    // das Komma NICHT, damit „1:23,456" (deutsche Schreibweise) heil bleibt.
+    function rundenAusText(text) {
+      return text
+        .split(/[\s;]+/)
+        .map(t => t.trim())
+        .filter(t => t.length > 0)
+        .map(zeitZuMs)
+        .filter(ms => ms !== null);
+    }
+
+    // Fügt mehrere Runden auf einmal hinzu (z.B. aus einem Zeitenblatt kopiert)
+    function rundenEinfuegen(text) {
+      const neue = rundenAusText(text);
+      if (neue.length === 0) return false;
+      neue.forEach(ms => aktuelleRunden.push(ms));
+      zeigeAktuelleRunden();
+      return true;
     }
 
     // Zeichnet die kleinen Runden-Chips unter dem Eingabefeld
@@ -590,6 +623,52 @@
     }
 
     // ==========================================================
+    // BACKUP: Export & Import (alle Rennen als Datei)
+    // ==========================================================
+
+    // Lädt alle Rennen als JSON-Datei herunter (zum Sichern oder Übertragen)
+    function exportiere() {
+      const rennen = ladeRennen();
+      if (rennen.length === 0) { alert('Noch keine Rennen zum Sichern da.'); return; }
+      const inhalt = JSON.stringify(rennen, null, 2);
+      const blob = new Blob([inhalt], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'renn-tagebuch-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // Liest eine Backup-Datei ein und fügt neue Rennen hinzu (ohne Duplikate)
+    function importiere(datei) {
+      const leser = new FileReader();
+      leser.onload = () => {
+        try {
+          const daten = JSON.parse(leser.result);
+          if (!Array.isArray(daten)) throw new Error('kein gültiges Backup');
+
+          const vorhanden = ladeRennen();
+          const bekannteIds = new Set(vorhanden.map(r => r.id));
+          let neu = 0;
+          daten.forEach(r => {
+            if (r && r.id && Array.isArray(r.runden) && !bekannteIds.has(r.id)) {
+              vorhanden.push(r);
+              bekannteIds.add(r.id);
+              neu++;
+            }
+          });
+          speichereRennen(vorhanden);
+          zeigeAlleRennen();
+          alert(neu + ' neue Rennen importiert' + (neu !== daten.length ? ' (Doppelte übersprungen).' : '.'));
+        } catch (e) {
+          alert('Das war keine gültige Backup-Datei.');
+        }
+      };
+      leser.readAsText(datei);
+    }
+
+    // ==========================================================
     // START: alles verkabeln
     // ==========================================================
 
@@ -604,6 +683,23 @@
     // Enter im Runden-Feld = Runde hinzufügen
     $('runde').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); rundeHinzufuegen(); }
+    });
+
+    // Mehrere Zeiten einfügen: erkennt kopierte Blöcke (mehrzeilig o.ä.)
+    $('runde').addEventListener('paste', (e) => {
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      if (text && /[\s;]/.test(text.trim())) {   // mehr als eine Zeit erkannt
+        e.preventDefault();
+        if (rundenEinfuegen(text)) $('runde').value = '';
+      }
+    });
+
+    // Backup: herunterladen / einlesen
+    $('export-btn').addEventListener('click', exportiere);
+    $('import-btn').addEventListener('click', () => $('import-datei').click());
+    $('import-datei').addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) importiere(e.target.files[0]);
+      e.target.value = '';   // erlaubt, dieselbe Datei erneut zu wählen
     });
 
     // Beim Laden der Seite: Datum vorbelegen und gespeicherte Rennen zeigen
