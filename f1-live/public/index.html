@@ -93,6 +93,12 @@
     .analyse-zeile { margin-bottom: 0.6rem; }
     svg { width: 100%; height: 130px; display: block; margin-top: 0.75rem; }
 
+    /* Runden-Historie */
+    .lap-liste { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.2rem; }
+    .lap-zeile { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; font-variant-numeric: tabular-nums; padding: 0.15rem 0; border-bottom: 1px solid #1e1e1e; }
+    .lap-zeile .lap-nr { color: var(--grau); font-size: 0.7rem; width: 2.2rem; }
+    .lap-zeile .lap-zeit { flex: 1; }
+
     .hinweis { color: var(--grau); font-size: 0.8rem; text-align: center; padding: 1rem; }
 
     /* Renningenieur */
@@ -148,7 +154,9 @@
         <div class="kachel"><div class="wert" style="color:var(--gruen)" id="beste">–</div><div class="name">Beste Runde</div></div>
         <div class="kachel"><div class="wert" id="sprit">–</div><div class="name">Sprit (kg)</div></div>
         <div class="kachel"><div class="wert" id="reichweite">–</div><div class="name">Reichweite (Rd.)</div></div>
+        <div class="kachel"><div class="wert" id="speed">–</div><div class="name">Speed (km/h)</div></div>
         <div class="kachel"><div class="wert" id="tracktemp">–</div><div class="name">Asphalt °C</div></div>
+        <div class="kachel"><div class="wert" id="airtemp">–</div><div class="name">Luft °C</div></div>
       </div>
     </div>
 
@@ -275,10 +283,14 @@
       $('pos').textContent      = d.position ?? '–';
 
       // Kennzahlen
+      const runden0 = d.fertigeRunden || [];
       $('letzte').textContent    = d.lastLapMs ? msZuZeit(d.lastLapMs) : '–';
+      $('beste').textContent     = runden0.length ? msZuZeit(Math.min(...runden0)) : '–';
       $('sprit').textContent     = d.fuelInTank != null ? d.fuelInTank.toFixed(1) : '–';
       $('reichweite').textContent = d.fuelRemainingLaps != null ? d.fuelRemainingLaps.toFixed(1) : '–';
+      $('speed').textContent     = d.speed != null ? d.speed : '–';
       $('tracktemp').textContent = d.trackTemp != null ? d.trackTemp : '–';
+      $('airtemp').textContent   = d.airTemp != null ? d.airTemp : '–';
 
       // Reifen-Mischung
       if (d.reifen) {
@@ -313,6 +325,19 @@
                   '<span style="color:var(--grau);font-size:0.8rem">' + (pr >= 0 ? '+' : '') + pr.toFixed(3) + ' s/Runde</span></div>';
         }
         html += baueDiagramm(runden);
+
+        // Runden-Historie: die letzten Runden mit Delta zur Bestzeit
+        const letzteRunden = runden.map((ms, i) => ({ n: i + 1, ms })).slice(-10).reverse();
+        html += '<div class="lap-liste">' + letzteRunden.map(r => {
+          const ist = r.ms === stat.beste;
+          const dSek = (r.ms - stat.beste) / 1000;
+          const dTxt = ist ? 'Best' : (dSek >= 0 ? '+' : '−') + Math.abs(dSek).toFixed(3);
+          const dCls = ist ? 'delta-gut' : 'delta-schlecht';
+          return '<div class="lap-zeile"><span class="lap-nr">R' + r.n + '</span>' +
+                 '<span class="lap-zeit">' + msZuZeit(r.ms) + '</span>' +
+                 '<span class="' + dCls + '">' + dTxt + '</span></div>';
+        }).join('') + '</div>';
+
         $('analyse-inhalt').innerHTML = html;
       }
 
@@ -565,13 +590,19 @@
       }
     }
 
-    // Funk-Knopf: Sprachausgabe an/aus (der Klick zählt als Freigabe fürs Vorlesen)
-    $('rg-funk').addEventListener('click', () => {
-      RG.sprache = !RG.sprache;
+    // Setzt die Optik des Funk-Knopfs passend zum Zustand
+    function rgFunkKnopf() {
       const b = $('rg-funk');
       b.textContent = RG.sprache ? '🔊 Funk an' : '🔇 Funk aus';
       b.classList.toggle('btn-rot', RG.sprache);
       b.classList.toggle('btn-grau', !RG.sprache);
+    }
+
+    // Funk-Knopf: Sprachausgabe an/aus (der Klick zählt als Freigabe fürs Vorlesen)
+    $('rg-funk').addEventListener('click', () => {
+      RG.sprache = !RG.sprache;
+      try { localStorage.setItem('f1FunkAn', RG.sprache ? '1' : '0'); } catch (e) {}
+      rgFunkKnopf();
       if (RG.sprache) {
         rgLadeStimme();
         RG.lastSpeakAt = 0;
@@ -580,6 +611,11 @@
         window.speechSynthesis.cancel();
       }
     });
+
+    // Gespeicherte Funk-Einstellung wiederherstellen (spricht erst nach 1. Klick)
+    try {
+      if (localStorage.getItem('f1FunkAn') === '1') { RG.sprache = true; rgLadeStimme(); rgFunkKnopf(); }
+    } catch (e) {}
 
     // ---------- Session ins Renn-Tagebuch übernehmen ----------
     // Speichert die gefahrenen Runden als Datei, die im Renn-Tagebuch
