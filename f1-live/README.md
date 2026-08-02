@@ -6,16 +6,19 @@ welches Spiel gerade sendet, und zeigt es oben an ("F1 25" / "F1 26").
 Zeigt dir **während des Fahrens** live im Browser an: aktuelle Rundenzeit,
 letzte/beste Runde, welche Reifen du hast, die **Abnutzung pro Reifen in %**,
 Reifen-Temperaturen, Sprit + Reichweite, **ERS-Akku & Modus, DRS, Gang,
-Bremstemperaturen, Sprit-Gemisch, Wetter, Sektorzeiten, Streckenflaggen &
-Strafen** – und wertet automatisch **Konstanz** und **Reifen-Abbau** aus.
+Bremstemperaturen, Sprit-Gemisch, Wetter, Sektorzeiten, Streckenflaggen,
+Strafen, Schaden am Auto (Flügel/Unterboden/Getriebe/Motor), Abstände zu
+Vordermann/Führendem und die Regen-Vorhersage** – und wertet automatisch
+**Konstanz** und **Reifen-Abbau** aus.
 
 Dazu ein **vorausschauender Renningenieur** mit Live-Ansagen (Text und
 optional gesprochen): Live-Delta zur Bestrunde, vorhergesagtes
 Boxenstopp-Fenster, Sprit bis zur Zielflagge, Pace-Trend, Abbau-Kosten,
 Stint-Zusammenfassung, Regen-/Flaggen-/Strafen-Warnungen, heiße Bremsen –
 und er beantwortet auf Zuruf Fragen zu **Reifen, Box, Sprit, Temperatur,
-Bremsen, ERS, DRS, Wetter, Sektoren, Position, Pace, Strafe** oder gibt auf
-„Strategie" den kompletten Plan. Alles **kostenlos & offline**.
+Bremsen, ERS, DRS, Wetter, Regen-Vorhersage, Sektoren, Abstand, Schaden,
+Position, Pace, Strafe** oder gibt auf „Strategie" den kompletten Plan. Alles
+**kostenlos & offline**.
 
 Und – wenn du willst – **🧠 Chef PRO**: ein *echter KI-Renningenieur* (Claude),
 mit dem du wie mit einer Person redest. Er sieht dabei deine Live-Telemetrie
@@ -112,7 +115,7 @@ node server.js --debug
 
 Dann zeigt das Terminal alle 2 Sekunden, was ankommt – z.B.:
 ```
-F1 25 (Format 2025) | Reifen Soft (Alter 3) | Abnutzung FL 12.4% FR 11.8% RL 9.2% RR 9.6% | Sprit 78.5kg (Standard) | ERS 64% (Mittel) | DRS zu | Gang 6 | Bremse max 430° | Wetter Klar | S1 28.301 S2 31.204 | letzte Runde 91.234s
+F1 25 (Format 2025) | Reifen Soft (Alter 3) | Abnutzung FL 12.4% FR 11.8% RL 9.2% RR 9.6% | Sprit 78.5kg (Standard) | ERS 64% (Mittel) | DRS zu | Gang 6 | Bremse max 430° | Wetter Klar | S1 28.301 S2 31.204 | Schaden heil | Gap vorne 1.2s | Vorhersage 0min 5%, 5min 15%, 15min 25% | letzte Runde 91.234s
 ```
 Sehen die Zahlen plausibel aus (Reifen 0–100 %, Sprit ~0–110 kg, ERS 0–100 %,
 Bremsen ~100–1000 °C, Runde/Sektoren als sinnvolle Zeit), passt alles. Falls

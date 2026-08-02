@@ -203,6 +203,8 @@
         <div class="kachel"><div class="wert" id="bremsen">–</div><div class="name">Bremse max °C</div></div>
         <div class="kachel"><div class="wert" id="gemisch">–</div><div class="name">Sprit-Gemisch</div></div>
         <div class="kachel"><div class="wert" id="wetter">–</div><div class="name">Wetter</div></div>
+        <div class="kachel"><div class="wert" id="gap-vorne">–</div><div class="name">Abstand vorne (s)</div></div>
+        <div class="kachel"><div class="wert" id="schaden">–</div><div class="name">Größter Schaden</div></div>
         <div class="kachel"><div class="wert" id="tracktemp">–</div><div class="name">Asphalt °C</div></div>
         <div class="kachel"><div class="wert" id="airtemp">–</div><div class="name">Luft °C</div></div>
       </div>
@@ -395,6 +397,12 @@
       bremsEl.style.color = bmax == null ? 'var(--grau)' : bmax > 750 ? 'var(--rot)' : bmax < 250 ? 'var(--blau)' : 'var(--gruen)';
       $('gemisch').textContent = d.fuelMix || '–';
       $('wetter').textContent  = d.wetter || '–';
+      $('gap-vorne').textContent = (d.gapVorne != null && d.gapVorne > 0) ? komma(d.gapVorne, 1) : (d.position === 1 ? 'P1' : '–');
+      const sc = schlimmsterSchaden(d.schaden);
+      const schadenEl = $('schaden');
+      if (!d.schaden) { schadenEl.textContent = '–'; schadenEl.style.color = 'var(--grau)'; }
+      else if (!sc) { schadenEl.textContent = 'heil'; schadenEl.style.color = 'var(--gruen)'; }
+      else { schadenEl.textContent = sc.wert + '%'; schadenEl.style.color = sc.wert >= 40 ? 'var(--rot)' : sc.wert >= 15 ? 'var(--gelb)' : 'var(--gruen)'; schadenEl.title = sc.name; }
 
       // Streckenflagge / Strafe im Kopf anzeigen
       const flagEl = $('flag-anzeige');
@@ -479,6 +487,8 @@
       lastWetter: null,    // um Wetter-Wechsel zu erkennen
       lastFlagge: null,    // um neue Streckenflaggen zu erkennen
       lastStrafe: 0,       // um neue Strafen zu erkennen
+      lastSchaden: 0,      // um neuen Schaden zu erkennen
+      regenGewarnt: false, // Regen-Vorhersage nur einmal ansagen
     };
 
     const WEAR_LIMIT = 100;  // Reifen bei 100 % "runter"
@@ -628,6 +638,25 @@
         rgMelde('Zeitstrafe: ' + d.strafenSek + ' Sekunden. Jetzt fehlerfrei fahren.', 'rg-warn', 'strafe', 10000, 'krit');
       }
       RG.lastStrafe = d.strafenSek || 0;
+
+      // Neuer/größerer Schaden am Auto (z.B. nach Kontakt)
+      if (d.schaden) {
+        const sc = schlimmsterSchaden(d.schaden);
+        const wert = sc ? sc.wert : 0;
+        if (sc && wert >= 10 && wert > RG.lastSchaden + 4) {
+          rgMelde('Schaden: ' + sc.name + ' bei ' + wert + ' Prozent. ' + (wert >= 40 ? 'Das kostet spürbar – Box überlegen.' : 'Im Blick behalten.'), 'rg-warn', 'schaden', 15000, 'krit');
+        }
+        RG.lastSchaden = wert;
+      }
+
+      // Regen-Vorhersage: rechtzeitig vor dem Regen warnen (einmal)
+      if (!RG.regenGewarnt && d.wetterVorhersage) {
+        const rk = regenKommt(d.wetterVorhersage);
+        if (rk) {
+          rgMelde('Wetter-Vorhersage: in etwa ' + rk.minuten + ' Minuten Regen, ' + rk.regen + ' Prozent. Reifenstrategie vorbereiten.', 'rg-krit', 'regen-vor', 60000, 'krit');
+          RG.regenGewarnt = true;
+        }
+      }
 
       // Reifenwechsel -> Stint-Zusammenfassung + Reset der Vorhersage
       if (d.reifen && d.reifen.name && d.reifen.name !== '—' && d.reifen.name !== RG.lastReifen) {
@@ -860,6 +889,24 @@
       return { slope: s, richtung };
     }
 
+    // Schaden am Auto: welches Teil ist am stärksten beschädigt?
+    const SCHADEN_NAMEN = { flWing: 'Frontflügel links', frWing: 'Frontflügel rechts', heckWing: 'Heckflügel', boden: 'Unterboden', diffusor: 'Diffusor', sidepod: 'Seitenkasten', getriebe: 'Getriebe', motor: 'Motor' };
+    function schlimmsterSchaden(s) {
+      if (!s) return null;
+      let key = null, wert = -1;
+      Object.keys(s).forEach(k => { if (s[k] > wert) { wert = s[k]; key = k; } });
+      return wert > 0 ? { key, name: SCHADEN_NAMEN[key] || key, wert } : null;
+    }
+
+    // Regen-Vorhersage: erstes Zukunftsfenster mit deutlich steigendem Regen
+    function regenKommt(vorhersage) {
+      if (!vorhersage || !vorhersage.length) return null;
+      for (const s of vorhersage) {
+        if (s.minuten > 0 && s.regen >= 40) return s;
+      }
+      return null;
+    }
+
     // Temperatur-Fenster eines Reifens
     function tempFenster(t) {
       if (t == null) return null;
@@ -916,7 +963,7 @@
 
       // Hilfe / was kann er
       if (/hilfe|was kannst|was kann ich fragen|befehl|kommando/.test(t)) {
-        return 'Frag mich nach Reifen, Box, Sprit, Temperatur, Bremsen, ERS, DRS, Wetter, Sektoren, Position, Pace oder Strafe – oder sag „Strategie" für den kompletten Überblick.';
+        return 'Frag mich nach Reifen, Box, Sprit, Temperatur, Bremsen, ERS, DRS, Wetter, Regen-Vorhersage, Sektoren, Abstand, Schaden, Position, Pace oder Strafe – oder sag „Strategie" für den kompletten Überblick.';
       }
 
       // Motivation / Zuspruch
@@ -942,7 +989,7 @@
       }
 
       // ERS / Akku / Batterie
-      if (/ers|akku|batterie|energie|hybrid|boost/.test(t)) {
+      if (/\bers\b|akku|batterie|energie|hybrid|boost/.test(t)) {
         if (d.ersProzent == null) return 'Ich habe keine ERS-Daten.';
         let rat = '';
         if (d.ersProzent >= 90) rat = ' Voll geladen – jetzt zum Angreifen oder Verteidigen einsetzen.';
@@ -967,8 +1014,8 @@
         return 'Bremsen maximal ' + bmax + ' Grad.' + rat;
       }
 
-      // Wetter / Regen
-      if (/wetter|regen|nass|trocken|regnet/.test(t)) {
+      // Wetter / Regen (aber nicht die Vorhersage – die kommt weiter unten)
+      if (/wetter|regen|nass|trocken|regnet/.test(t) && !/vorhersage|kommt|wird es|prognose|wetterbericht|gleich|später|spaeter|nachher/.test(t)) {
         if (!d.wetter) return 'Ich habe keine Wetterdaten.';
         const nass = /regen|gewitter/i.test(d.wetter);
         return 'Wetter: ' + d.wetter + '.' + (nass ? ' Es ist nass – über Regenreifen nachdenken und vorsichtig ans Gas.' : ' Trocken, alles normal.');
@@ -998,6 +1045,35 @@
       // Strafe
       if (/strafe|penalty|penalt/.test(t)) {
         return d.strafenSek > 0 ? 'Du hast ' + d.strafenSek + ' Sekunden Zeitstrafe offen.' : 'Keine offene Strafe – sauber.';
+      }
+
+      // Schaden am Auto
+      if (/schaden|kaputt|beschädig|beschaedig|flügel|fluegel|auto.*ok|wie steht.*auto|motor|getriebe|unterboden/.test(t)) {
+        const sc = schlimmsterSchaden(d.schaden);
+        if (!d.schaden) return 'Ich habe keine Schadensdaten.';
+        if (!sc) return 'Das Auto ist heil, kein Schaden.';
+        let z = 'Größter Schaden: ' + sc.name + ' ' + sc.wert + ' Prozent.';
+        if (sc.wert >= 30 && /wing|flügel|fluegel/i.test(sc.key)) z += ' Das kostet Abtrieb – bei Gelegenheit prüfen, ob ein neuer Flügel lohnt.';
+        else if (sc.wert < 10) z += ' Halb so wild, fahr weiter.';
+        return z;
+      }
+
+      // Regen-Vorhersage
+      if (/vorhersage|kommt.*regen|regen.*kommt|wird es regnen|wetterbericht|prognose/.test(t)) {
+        if (!d.wetterVorhersage || !d.wetterVorhersage.length) return 'Ich habe noch keine Wetter-Vorhersage.';
+        const rk = regenKommt(d.wetterVorhersage);
+        if (rk) return 'In etwa ' + rk.minuten + ' Minuten ' + (rk.wetter || 'Regen') + ', ' + rk.regen + ' Prozent Regen. Reifenwahl im Kopf behalten.';
+        const max = d.wetterVorhersage.reduce((a, s) => Math.max(a, s.regen), 0);
+        return max < 20 ? 'Bleibt trocken – keine nennenswerte Regengefahr.' : 'Wechselhaft, bis zu ' + max + ' Prozent Regen, aber nichts Akutes.';
+      }
+
+      // Abstand nach vorne / zum Führenden
+      if (/abstand|gap|vordermann|vorne dran|lücke|luecke|führend|fuehrend|wie weit/.test(t)) {
+        const teile = [];
+        if (d.gapVorne != null && d.gapVorne > 0) teile.push(komma(d.gapVorne, 1) + ' Sekunden zum Vordermann');
+        if (d.gapFuehrend != null && d.gapFuehrend > 0) teile.push(komma(d.gapFuehrend, 1) + ' Sekunden zum Führenden');
+        if (!teile.length) return d.position === 1 ? 'Du führst das Rennen an!' : 'Ich habe gerade keine Abstands-Daten.';
+        return teile.join(', ') + '.';
       }
 
       // Temperatur mit Rat
@@ -1304,6 +1380,7 @@
       RG.lastReifen = null; RG.cooldowns = {};
       RG.bestSektor1 = Infinity; RG.bestSektor2 = Infinity;
       RG.lastWetter = null; RG.lastFlagge = null; RG.lastStrafe = 0;
+      RG.lastSchaden = 0; RG.regenGewarnt = false;
       $('rg-feed').innerHTML = '<div class="rg-leer">Neue Session – der Renningenieur meldet sich, sobald du fährst.</div>';
       $('analyse-inhalt').innerHTML = '<div class="hinweis">Neue Session gestartet. Fahr los! 🏎️</div>';
       $('live-delta').innerHTML = '';

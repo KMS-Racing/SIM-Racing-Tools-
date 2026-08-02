@@ -25,8 +25,9 @@ Alles wird lokal im Browser gespeichert (localStorage). Einfach
 Zeigt **während des Fahrens** in F1 25/26 live im Browser an: Rundenzeit,
 letzte/beste Runde, welche Reifen, **Abnutzung pro Reifen in %**,
 Reifen-Temperaturen, Sprit & Reichweite, **ERS-Akku & Modus, DRS, Gang,
-Bremstemperaturen, Sprit-Gemisch, Wetter, Sektorzeiten, Flaggen & Strafen** –
-plus automatische Konstanz- und Reifen-Abbau-Analyse.
+Bremstemperaturen, Sprit-Gemisch, Wetter, Sektorzeiten, Flaggen, Strafen,
+Schaden am Auto, Abstände und Regen-Vorhersage** – plus automatische
+Konstanz- und Reifen-Abbau-Analyse.
 
 Dazu ein **vorausschauender Renningenieur** mit Live-Ansagen (Text und
 optional gesprochen): Live-Delta zur Bestrunde, vorhergesagtes

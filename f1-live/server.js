@@ -108,11 +108,19 @@ if (DEBUG) {
       `Gang ${zustand.gang ?? '?'} | Bremse max ${b.FL != null ? Math.max(b.FL, b.FR, b.RL, b.RR) + '°' : '?'} | ` +
       `Wetter ${zustand.wetter ?? '?'}${zustand.fiaFlagge ? ' | Flagge ' + zustand.fiaFlagge : ''}${zustand.strafenSek ? ' | +' + zustand.strafenSek + 's' : ''} | ` +
       `S1 ${zustand.sektor1Ms ? (zustand.sektor1Ms / 1000).toFixed(3) : '?'} S2 ${zustand.sektor2Ms ? (zustand.sektor2Ms / 1000).toFixed(3) : '?'} | ` +
+      `Schaden ${schadenText(zustand.schaden)} | Gap vorne ${zustand.gapVorne != null ? zustand.gapVorne.toFixed(1) + 's' : '?'} | ` +
+      `Vorhersage ${zustand.wetterVorhersage ? zustand.wetterVorhersage.map(s => s.minuten + 'min ' + s.regen + '%').slice(0, 3).join(', ') : '?'} | ` +
       `letzte Runde ${zustand.lastLapMs ? (zustand.lastLapMs / 1000).toFixed(3) + 's' : '?'}`
     );
   }, 2000);
 }
 function fmt(v) { return v == null ? '?' : v.toFixed(1) + '%'; }
+function schadenText(s) {
+  if (!s) return '?';
+  let key = null, w = -1;
+  Object.keys(s).forEach(k => { if (s[k] > w) { w = s[k]; key = k; } });
+  return w > 0 ? key + ' ' + w + '%' : 'heil';
+}
 
 // --------------------------------------------------------------
 // DEMO-Modus: simulierte Telemetrie, damit man das Dashboard auch
@@ -168,6 +176,15 @@ if (DEMO) {
     zustand.sektor2Ms  = 31000 + Math.round(Math.cos(lapNum) * 300);
     zustand.fiaFlagge  = (lapNum === 7) ? 'gelb' : null;
     zustand.strafenSek = (lapNum >= 10) ? 5 : 0;
+    zustand.gapVorne    = +(1.2 + Math.sin(lapNum) * 0.8).toFixed(1);
+    zustand.gapFuehrend = +(3 + lapNum * 0.4).toFixed(1);
+    zustand.schaden = { flWing: Math.min(60, lapNum * 2), frWing: 0, heckWing: 0, boden: Math.min(20, lapNum), diffusor: 0, sidepod: 0, getriebe: 0, motor: Math.min(15, Math.floor(lapNum / 2)) };
+    // Regen-Vorhersage: ab Rennmitte zieht Regen auf
+    zustand.wetterVorhersage = [
+      { minuten: 0,  wetter: 'Klar',           regen: 5 },
+      { minuten: 5,  wetter: 'Leicht bewölkt', regen: lapNum > 8 ? 45 : 15 },
+      { minuten: 15, wetter: 'Leichter Regen', regen: lapNum > 8 ? 70 : 25 },
+    ];
 
     if (lapMs >= ziel) {
       zustand.lastLapMs = ziel;   // fertige Runde
@@ -218,8 +235,12 @@ function schnappschuss() {
     bremsenC: zustand.bremsTemp || null,
     spritGemisch: zustand.fuelMix ?? null,
     wetter: zustand.wetter ?? null,
+    wetterVorhersage: zustand.wetterVorhersage || null,
     streckenflagge: zustand.fiaFlagge ?? null,
     zeitstrafeSek: zustand.strafenSek ?? null,
+    schadenProzent: zustand.schaden || null,
+    abstandVorneS: zustand.gapVorne ?? null,
+    abstandFuehrendS: zustand.gapFuehrend ?? null,
     asphaltC: zustand.trackTemp ?? null,
     luftC: zustand.airTemp ?? null,
   };
