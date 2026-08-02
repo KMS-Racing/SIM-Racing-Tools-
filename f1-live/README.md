@@ -5,12 +5,17 @@ welches Spiel gerade sendet, und zeigt es oben an ("F1 25" / "F1 26").
 
 Zeigt dir **während des Fahrens** live im Browser an: aktuelle Rundenzeit,
 letzte/beste Runde, welche Reifen du hast, die **Abnutzung pro Reifen in %**,
-Reifen-Temperaturen, Sprit + Reichweite – und wertet automatisch **Konstanz**
-und **Reifen-Abbau** deiner Runden aus.
+Reifen-Temperaturen, Sprit + Reichweite, **ERS-Akku & Modus, DRS, Gang,
+Bremstemperaturen, Sprit-Gemisch, Wetter, Sektorzeiten, Streckenflaggen &
+Strafen** – und wertet automatisch **Konstanz** und **Reifen-Abbau** aus.
 
 Dazu ein **vorausschauender Renningenieur** mit Live-Ansagen (Text und
-optional gesprochen): Live-Delta zur Bestrunde, Boxenstopp-Fenster,
-Abbau-Kosten, Sprit-Sparziel, Stint-Zusammenfassung.
+optional gesprochen): Live-Delta zur Bestrunde, vorhergesagtes
+Boxenstopp-Fenster, Sprit bis zur Zielflagge, Pace-Trend, Abbau-Kosten,
+Stint-Zusammenfassung, Regen-/Flaggen-/Strafen-Warnungen, heiße Bremsen –
+und er beantwortet auf Zuruf Fragen zu **Reifen, Box, Sprit, Temperatur,
+Bremsen, ERS, DRS, Wetter, Sektoren, Position, Pace, Strafe** oder gibt auf
+„Strategie" den kompletten Plan. Alles **kostenlos & offline**.
 
 Und – wenn du willst – **🧠 Chef PRO**: ein *echter KI-Renningenieur* (Claude),
 mit dem du wie mit einer Person redest. Er sieht dabei deine Live-Telemetrie
@@ -107,11 +112,12 @@ node server.js --debug
 
 Dann zeigt das Terminal alle 2 Sekunden, was ankommt – z.B.:
 ```
-Format 2025 | Reifen Soft (Alter 3) | Abnutzung FL 12.4% FR 11.8% RL 9.2% RR 9.6% | Sprit 78.5kg | letzte Runde 91.234s
+F1 25 (Format 2025) | Reifen Soft (Alter 3) | Abnutzung FL 12.4% FR 11.8% RL 9.2% RR 9.6% | Sprit 78.5kg (Standard) | ERS 64% (Mittel) | DRS zu | Gang 6 | Bremse max 430° | Wetter Klar | S1 28.301 S2 31.204 | letzte Runde 91.234s
 ```
-Sehen die Zahlen plausibel aus (Reifen 0–100 %, Sprit ~0–110 kg, Runde als
-sinnvolle Zeit), passt alles. Falls nicht, sag Bescheid – dann justieren wir
-eine Kleinigkeit im Parser.
+Sehen die Zahlen plausibel aus (Reifen 0–100 %, Sprit ~0–110 kg, ERS 0–100 %,
+Bremsen ~100–1000 °C, Runde/Sektoren als sinnvolle Zeit), passt alles. Falls
+ein Wert bei **F1 26** unsinnig ist, sag Bescheid – dann justieren wir die
+betroffene Position nur in der 2026-Tabelle (`f1parser.js`).
 
 ---
 

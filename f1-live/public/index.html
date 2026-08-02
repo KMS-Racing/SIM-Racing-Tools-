@@ -128,6 +128,12 @@
     .rg-warn { border-left-color: var(--gelb); }
     .rg-krit { border-left-color: var(--rot); }
     .rg-pro  { border-left-color: var(--blau); background: rgba(74,158,255,0.06); }
+    /* Streckenflagge / Strafe im Kopf */
+    .flag { padding: 0.3rem 0.7rem; border-radius: 6px; font-size: 0.8rem; font-weight: bold; }
+    .flag-gelb { background: var(--gelb); color: #0d0d0d; }
+    .flag-rot  { background: var(--rot);  color: #0d0d0d; }
+    .flag-blau { background: var(--blau); color: #0d0d0d; }
+    .flag-grün { background: var(--gruen); color: #0d0d0d; }
     .rg-leer { color: var(--grau); font-size: 0.85rem; text-align: center; padding: 0.5rem; }
     @keyframes rg-rein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .rg-msg { animation: none; } }
@@ -136,6 +142,7 @@
 <body>
   <div class="kopf">
     <h1 id="titel">🏁 F1 · Live</h1>
+    <div id="flag-anzeige" class="flag" style="display:none"></div>
     <div id="status" class="status warte">Warte auf Verbindung …</div>
   </div>
 
@@ -190,6 +197,12 @@
         <div class="kachel"><div class="wert" id="sprit">–</div><div class="name">Sprit (kg)</div></div>
         <div class="kachel"><div class="wert" id="reichweite">–</div><div class="name">Reichweite (Rd.)</div></div>
         <div class="kachel"><div class="wert" id="speed">–</div><div class="name">Speed (km/h)</div></div>
+        <div class="kachel"><div class="wert" id="ers">–</div><div class="name">ERS (Akku %)</div></div>
+        <div class="kachel"><div class="wert" id="drs">–</div><div class="name">DRS</div></div>
+        <div class="kachel"><div class="wert" id="gang">–</div><div class="name">Gang</div></div>
+        <div class="kachel"><div class="wert" id="bremsen">–</div><div class="name">Bremse max °C</div></div>
+        <div class="kachel"><div class="wert" id="gemisch">–</div><div class="name">Sprit-Gemisch</div></div>
+        <div class="kachel"><div class="wert" id="wetter">–</div><div class="name">Wetter</div></div>
         <div class="kachel"><div class="wert" id="tracktemp">–</div><div class="name">Asphalt °C</div></div>
         <div class="kachel"><div class="wert" id="airtemp">–</div><div class="name">Luft °C</div></div>
       </div>
@@ -369,6 +382,26 @@
       $('tracktemp').textContent = d.trackTemp != null ? d.trackTemp : '–';
       $('airtemp').textContent   = d.airTemp != null ? d.airTemp : '–';
 
+      // Neue Kennzahlen: ERS, DRS, Gang, Bremsen, Gemisch, Wetter
+      $('ers').textContent     = d.ersProzent != null ? d.ersProzent + '%' : '–';
+      const drsEl = $('drs');
+      if (d.drsOffen) { drsEl.textContent = 'OFFEN'; drsEl.style.color = 'var(--gruen)'; }
+      else if (d.drsErlaubt) { drsEl.textContent = 'bereit'; drsEl.style.color = 'var(--blau)'; }
+      else { drsEl.textContent = 'zu'; drsEl.style.color = 'var(--grau)'; }
+      $('gang').textContent    = d.gang != null ? (d.gang === 0 ? 'N' : d.gang === -1 ? 'R' : d.gang) : '–';
+      const bmax = d.bremsTemp ? Math.max(d.bremsTemp.FL, d.bremsTemp.FR, d.bremsTemp.RL, d.bremsTemp.RR) : null;
+      const bremsEl = $('bremsen');
+      bremsEl.textContent = bmax != null ? bmax : '–';
+      bremsEl.style.color = bmax == null ? 'var(--grau)' : bmax > 750 ? 'var(--rot)' : bmax < 250 ? 'var(--blau)' : 'var(--gruen)';
+      $('gemisch').textContent = d.fuelMix || '–';
+      $('wetter').textContent  = d.wetter || '–';
+
+      // Streckenflagge / Strafe im Kopf anzeigen
+      const flagEl = $('flag-anzeige');
+      if (d.fiaFlagge) { flagEl.textContent = 'Flagge: ' + d.fiaFlagge.toUpperCase(); flagEl.style.display = ''; flagEl.className = 'flag flag-' + d.fiaFlagge; }
+      else if (d.strafenSek > 0) { flagEl.textContent = '+' + d.strafenSek + 's Strafe'; flagEl.style.display = ''; flagEl.className = 'flag flag-gelb'; }
+      else { flagEl.style.display = 'none'; }
+
       // Reifen-Mischung
       if (d.reifen) {
         $('reifen-name').textContent = d.reifen.name;
@@ -441,6 +474,11 @@
       stintStartCount: 0,  // ab welcher Runde der aktuelle Reifensatz läuft
       lastSpeakAt: 0,      // Zeitpunkt der letzten gesprochenen Ansage
       schwellen: { heiss: 130, kritisch: 85 },  // einstellbare Warn-Schwellen
+      bestSektor1: Infinity, // beste Sektor-1-Zeit dieser Session
+      bestSektor2: Infinity, // beste Sektor-2-Zeit dieser Session
+      lastWetter: null,    // um Wetter-Wechsel zu erkennen
+      lastFlagge: null,    // um neue Streckenflaggen zu erkennen
+      lastStrafe: 0,       // um neue Strafen zu erkennen
     };
 
     const WEAR_LIMIT = 100;  // Reifen bei 100 % "runter"
@@ -561,6 +599,36 @@
     function rgPruefe(d) {
       rgDelta(d);
 
+      // Beste Sektorzeiten mitschreiben (für "wo verliere ich Zeit")
+      if (d.sektor1Ms && d.sektor1Ms < RG.bestSektor1) RG.bestSektor1 = d.sektor1Ms;
+      if (d.sektor2Ms && d.sektor2Ms < RG.bestSektor2) RG.bestSektor2 = d.sektor2Ms;
+
+      // Wetter-Wechsel – besonders Regen ist strategisch wichtig
+      if (d.wetter && d.wetter !== RG.lastWetter) {
+        if (RG.lastWetter !== null) {
+          const nass = /regen|gewitter/i.test(d.wetter);
+          if (nass) rgMelde('Wetter dreht auf ' + d.wetter + '! Vorsichtig ans Gas, Regenreifen im Kopf behalten.', 'rg-krit', 'wetter', 20000, 'krit');
+          else rgMelde('Wetter wird besser: ' + d.wetter + '. Strecke trocknet ab.', 'rg-gut', 'wetter', 20000, 'info');
+        }
+        RG.lastWetter = d.wetter;
+      }
+
+      // Neue Streckenflagge (gelb/rot = Vorsicht)
+      if (d.fiaFlagge && d.fiaFlagge !== RG.lastFlagge) {
+        if (d.fiaFlagge === 'gelb') rgMelde('Gelbe Flagge – Gefahr, kein Überholen, bremsbereit.', 'rg-warn', 'flagge', 8000, 'krit');
+        else if (d.fiaFlagge === 'rot') rgMelde('Rote Flagge – Session unterbrochen.', 'rg-krit', 'flagge', 8000, 'krit');
+        else if (d.fiaFlagge === 'blau') rgMelde('Blaue Flagge – Schnellere kommen, lass sie vorbei.', 'rg-warn', 'flagge', 8000, 'info');
+        RG.lastFlagge = d.fiaFlagge;
+      } else if (!d.fiaFlagge) {
+        RG.lastFlagge = null;
+      }
+
+      // Neue Zeitstrafe
+      if (d.strafenSek != null && d.strafenSek > RG.lastStrafe) {
+        rgMelde('Zeitstrafe: ' + d.strafenSek + ' Sekunden. Jetzt fehlerfrei fahren.', 'rg-warn', 'strafe', 10000, 'krit');
+      }
+      RG.lastStrafe = d.strafenSek || 0;
+
       // Reifenwechsel -> Stint-Zusammenfassung + Reset der Vorhersage
       if (d.reifen && d.reifen.name && d.reifen.name !== '—' && d.reifen.name !== RG.lastReifen) {
         if (RG.lastReifen !== null) {
@@ -679,6 +747,14 @@
             rgMelde(namen[pos] + ' wird heiß, ' + d.reifenTemp[pos] + ' Grad. Etwas schonen.', 'rg-warn', 'heiss-' + pos, 40000, 'info');
           }
         });
+      }
+
+      // Bremsen zu heiß
+      if (d.bremsTemp) {
+        const bmax = Math.max(d.bremsTemp.FL, d.bremsTemp.FR, d.bremsTemp.RL, d.bremsTemp.RR);
+        if (bmax > 750) {
+          rgMelde('Bremsen sehr heiß, ' + bmax + ' Grad. Etwas schonen, sonst lassen sie nach.', 'rg-warn', 'bremse', 40000, 'info');
+        }
       }
 
       // Sprit-Sparziel (konkret statt nur "niedrig")
@@ -840,7 +916,7 @@
 
       // Hilfe / was kann er
       if (/hilfe|was kannst|was kann ich fragen|befehl|kommando/.test(t)) {
-        return 'Frag mich nach Reifen, Box, Sprit, Temperatur, Delta oder Pace – oder sag „Strategie" beziehungsweise „wie läufts" für den kompletten Überblick.';
+        return 'Frag mich nach Reifen, Box, Sprit, Temperatur, Bremsen, ERS, DRS, Wetter, Sektoren, Position, Pace oder Strafe – oder sag „Strategie" für den kompletten Überblick.';
       }
 
       // Motivation / Zuspruch
@@ -863,6 +939,65 @@
         const basis = (bk && bk.runden) ? ' Deine Reifen halten noch etwa ' + bk.runden + ' Runden, also ' +
                       (bk.runden <= 3 ? 'eher ein Undercut.' : 'noch Zeit für einen Overcut.') : '';
         return 'Undercut heißt früher an die Box und auf frischen Reifen sofort pushen, um den Gegner beim Stopp zu überholen. Overcut ist andersrum: länger draußen bleiben, solange deine Reifen noch gut sind.' + basis;
+      }
+
+      // ERS / Akku / Batterie
+      if (/ers|akku|batterie|energie|hybrid|boost/.test(t)) {
+        if (d.ersProzent == null) return 'Ich habe keine ERS-Daten.';
+        let rat = '';
+        if (d.ersProzent >= 90) rat = ' Voll geladen – jetzt zum Angreifen oder Verteidigen einsetzen.';
+        else if (d.ersProzent <= 15) rat = ' Fast leer – ein paar Runden im Segeln laden.';
+        return 'ERS-Akku bei ' + d.ersProzent + ' Prozent' + (d.ersModus ? ', Modus ' + d.ersModus : '') + '.' + rat;
+      }
+
+      // DRS
+      if (/drs|flügel|fluegel|heckflügel|overtake.*flügel/.test(t)) {
+        if (d.drsOffen) return 'DRS ist offen – volle Fahrt.';
+        if (d.drsErlaubt) return 'DRS ist freigegeben, du kannst es in der Zone öffnen.';
+        return 'DRS ist noch zu. Du brauchst unter einer Sekunde Rückstand in der DRS-Zone.';
+      }
+
+      // Bremsen
+      if (/bremse|brake|bremstemp/.test(t)) {
+        if (!d.bremsTemp) return 'Ich habe keine Bremsdaten.';
+        const bmax = Math.max(d.bremsTemp.FL, d.bremsTemp.FR, d.bremsTemp.RL, d.bremsTemp.RR);
+        let rat = ' Alles im grünen Bereich.';
+        if (bmax > 750) rat = ' Zu heiß – etwas weniger hart bremsen oder Luft reinlassen.';
+        else if (bmax < 250) rat = ' Noch kühl – härter bremsen bringt mehr Biss.';
+        return 'Bremsen maximal ' + bmax + ' Grad.' + rat;
+      }
+
+      // Wetter / Regen
+      if (/wetter|regen|nass|trocken|regnet/.test(t)) {
+        if (!d.wetter) return 'Ich habe keine Wetterdaten.';
+        const nass = /regen|gewitter/i.test(d.wetter);
+        return 'Wetter: ' + d.wetter + '.' + (nass ? ' Es ist nass – über Regenreifen nachdenken und vorsichtig ans Gas.' : ' Trocken, alles normal.');
+      }
+
+      // Sprit-Gemisch
+      if (/gemisch|mischung|fuel mix|mix|mager|fett/.test(t)) {
+        if (!d.fuelMix) return 'Ich habe keine Gemisch-Daten.';
+        return 'Sprit-Gemisch steht auf ' + d.fuelMix + (d.fuelMix === 'Mager' ? ' – spart Sprit, kostet etwas Leistung.' : d.fuelMix === 'Fett' || d.fuelMix === 'Maximal' ? ' – volle Leistung, mehr Verbrauch.' : '.');
+      }
+
+      // Sektoren / wo verliere ich Zeit
+      if (/sektor|sector|wo verlier|wo hol|welcher teil|abschnitt/.test(t)) {
+        const s1 = d.sektor1Ms, s2 = d.sektor2Ms;
+        if (!s1 && !s2) return 'Noch keine Sektorzeiten.';
+        const teile = [];
+        if (s1) teile.push('Sektor 1 ' + komma(s1 / 1000, 3) + (RG.bestSektor1 < Infinity && s1 > RG.bestSektor1 ? ' (' + komma((s1 - RG.bestSektor1) / 1000, 2) + ' über Best)' : ''));
+        if (s2) teile.push('Sektor 2 ' + komma(s2 / 1000, 3) + (RG.bestSektor2 < Infinity && s2 > RG.bestSektor2 ? ' (' + komma((s2 - RG.bestSektor2) / 1000, 2) + ' über Best)' : ''));
+        // schwächsten Sektor benennen
+        let hinweis = '';
+        const v1 = (RG.bestSektor1 < Infinity && s1) ? s1 - RG.bestSektor1 : 0;
+        const v2 = (RG.bestSektor2 < Infinity && s2) ? s2 - RG.bestSektor2 : 0;
+        if (v1 > 100 || v2 > 100) hinweis = ' Am meisten Zeit lässt du in Sektor ' + (v1 >= v2 ? '1' : '2') + '.';
+        return teile.join(', ') + '.' + hinweis;
+      }
+
+      // Strafe
+      if (/strafe|penalty|penalt/.test(t)) {
+        return d.strafenSek > 0 ? 'Du hast ' + d.strafenSek + ' Sekunden Zeitstrafe offen.' : 'Keine offene Strafe – sauber.';
       }
 
       // Temperatur mit Rat
@@ -1167,6 +1302,8 @@
       RG.bestLapMs = Infinity; RG.bestTrace = null; RG.currentTrace = [];
       RG.lastDist = null; RG.lastPushDist = null; RG.stintStartCount = 0;
       RG.lastReifen = null; RG.cooldowns = {};
+      RG.bestSektor1 = Infinity; RG.bestSektor2 = Infinity;
+      RG.lastWetter = null; RG.lastFlagge = null; RG.lastStrafe = 0;
       $('rg-feed').innerHTML = '<div class="rg-leer">Neue Session – der Renningenieur meldet sich, sobald du fährst.</div>';
       $('analyse-inhalt').innerHTML = '<div class="hinweis">Neue Session gestartet. Fahr los! 🏎️</div>';
       $('live-delta').innerHTML = '';

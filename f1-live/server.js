@@ -98,10 +98,16 @@ if (DEBUG) {
       return;
     }
     const r = zustand.reifenAbnutzung || {};
+    const b = zustand.bremsTemp || {};
     console.log(
       `F1 ${zustand.gameYear ?? '?'} (Format ${zustand.packetFormat}) | Reifen ${zustand.reifen ? zustand.reifen.name : '?'} ` +
       `(Alter ${zustand.reifenAlter ?? '?'}) | Abnutzung FL ${fmt(r.FL)} FR ${fmt(r.FR)} RL ${fmt(r.RL)} RR ${fmt(r.RR)} | ` +
-      `Sprit ${zustand.fuelInTank != null ? zustand.fuelInTank.toFixed(1) + 'kg' : '?'} | ` +
+      `Sprit ${zustand.fuelInTank != null ? zustand.fuelInTank.toFixed(1) + 'kg' : '?'} (${zustand.fuelMix ?? '?'}) | ` +
+      `ERS ${zustand.ersProzent != null ? zustand.ersProzent + '%' : '?'} (${zustand.ersModus ?? '?'}) | ` +
+      `DRS ${zustand.drsErlaubt ? 'frei' : 'zu'}${zustand.drsOffen ? '/offen' : ''} | ` +
+      `Gang ${zustand.gang ?? '?'} | Bremse max ${b.FL != null ? Math.max(b.FL, b.FR, b.RL, b.RR) + '°' : '?'} | ` +
+      `Wetter ${zustand.wetter ?? '?'}${zustand.fiaFlagge ? ' | Flagge ' + zustand.fiaFlagge : ''}${zustand.strafenSek ? ' | +' + zustand.strafenSek + 's' : ''} | ` +
+      `S1 ${zustand.sektor1Ms ? (zustand.sektor1Ms / 1000).toFixed(3) : '?'} S2 ${zustand.sektor2Ms ? (zustand.sektor2Ms / 1000).toFixed(3) : '?'} | ` +
       `letzte Runde ${zustand.lastLapMs ? (zustand.lastLapMs / 1000).toFixed(3) + 's' : '?'}`
     );
   }, 2000);
@@ -129,6 +135,8 @@ if (DEMO) {
   zustand.trackTemp = 42;
   zustand.airTemp = 27;
   zustand.position = 4;
+  zustand.fuelMix = 'Standard';
+  const WETTER_DEMO = ['Klar', 'Leicht bewölkt', 'Bedeckt', 'Leichter Regen'];
 
   // Ziel-Rundenzeit: leichter Abbau + etwas Rauschen (deterministisch)
   const zielFuer = (n) => BASE_LAP + (n - 1) * 260 + Math.round(Math.sin(n * 1.7) * 110);
@@ -147,6 +155,19 @@ if (DEMO) {
     zustand.reifenTemp        = { FL: 96 + Math.round(Math.sin(anteil * 9) * 8), FR: 97 + Math.round(Math.cos(anteil * 9) * 8), RL: 92 + Math.round(Math.sin(anteil * 7) * 6), RR: 93 + Math.round(Math.cos(anteil * 7) * 6) };
     zustand.fuelRemainingLaps = +fuelLaps.toFixed(1);
     zustand.fuelInTank        = +(fuelLaps * 2.3).toFixed(1);
+    // neue Werte simulieren
+    zustand.gang       = Math.max(1, Math.min(8, Math.round(2 + zustand.speed / 45)));
+    zustand.rpm        = 9000 + Math.round(Math.sin(anteil * Math.PI * 6) * 2500);
+    zustand.ersProzent = Math.round(50 + Math.sin(lapMs / 4000) * 45);
+    zustand.ersModus   = zustand.ersProzent > 70 ? 'Überholen' : 'Mittel';
+    zustand.drsErlaubt = anteil > 0.4 && anteil < 0.6;
+    zustand.drsOffen   = zustand.drsErlaubt && zustand.speed > 250;
+    zustand.bremsTemp  = { FL: 380 + Math.round(Math.sin(anteil * 11) * 220), FR: 390 + Math.round(Math.cos(anteil * 11) * 220), RL: 320 + Math.round(Math.sin(anteil * 9) * 180), RR: 330 + Math.round(Math.cos(anteil * 9) * 180) };
+    zustand.wetter     = WETTER_DEMO[Math.min(WETTER_DEMO.length - 1, Math.floor(lapNum / 6))];
+    zustand.sektor1Ms  = 28000 + Math.round(Math.sin(lapNum) * 300);
+    zustand.sektor2Ms  = 31000 + Math.round(Math.cos(lapNum) * 300);
+    zustand.fiaFlagge  = (lapNum === 7) ? 'gelb' : null;
+    zustand.strafenSek = (lapNum >= 10) ? 5 : 0;
 
     if (lapMs >= ziel) {
       zustand.lastLapMs = ziel;   // fertige Runde
@@ -189,6 +210,16 @@ function schnappschuss() {
     letzteRundeS: s(zustand.lastLapMs),
     besteRundeS: s(beste),
     letzteRundenS: fertigeRunden.slice(-8).map(s),
+    sektor1S: s(zustand.sektor1Ms),
+    sektor2S: s(zustand.sektor2Ms),
+    ersAkkuProzent: zustand.ersProzent ?? null,
+    ersModus: zustand.ersModus ?? null,
+    drsErlaubt: zustand.drsErlaubt ?? null,
+    bremsenC: zustand.bremsTemp || null,
+    spritGemisch: zustand.fuelMix ?? null,
+    wetter: zustand.wetter ?? null,
+    streckenflagge: zustand.fiaFlagge ?? null,
+    zeitstrafeSek: zustand.strafenSek ?? null,
     asphaltC: zustand.trackTemp ?? null,
     luftC: zustand.airTemp ?? null,
   };

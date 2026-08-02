@@ -26,11 +26,17 @@ const HEADER_SIZE = 29;
 // die übrigen Zahlen sind Offsets INNERHALB eines Auto-Blocks
 // (session-Offsets sind relativ zum Header-Ende).
 const LAYOUT_25 = {
-  lapData:   { size: 57, lastLapMs: 0, currentLapMs: 4, lapDistance: 20, position: 32, lapNum: 33 },
-  telemetry: { size: 60, speed: 0, surfaceTempStart: 30 },
-  status:    { size: 55, fuelInTank: 5, fuelRemainingLaps: 13, visualCompound: 26, tyresAge: 27 },
+  lapData:   { size: 57, lastLapMs: 0, currentLapMs: 4,
+               s1ms: 8, s1min: 10, s2ms: 11, s2min: 13,
+               lapDistance: 20, position: 32, lapNum: 33,
+               pitStatus: 34, invalid: 37, penalties: 38 },
+  telemetry: { size: 60, speed: 0, gear: 15, rpm: 16, drs: 18,
+               brakesTempStart: 22, surfaceTempStart: 30 },
+  status:    { size: 55, fuelMix: 2, fuelInTank: 5, fuelRemainingLaps: 13,
+               drsAllowed: 22, visualCompound: 26, tyresAge: 27,
+               fiaFlags: 28, ersStore: 37, ersMode: 41 },
   damage:    { size: 42, tyresWearStart: 0 },
-  session:   { trackTemp: 1, airTemp: 2, totalLaps: 3 },
+  session:   { weather: 0, trackTemp: 1, airTemp: 2, totalLaps: 3 },
 };
 
 // F1 26: vorerst identisch zu F1 25 (Basis-Annahme, bei Bedarf hier anpassen)
@@ -55,6 +61,21 @@ const REIFEN = {
   7:  { name: 'Inter',  farbe: '#3fb950' },
   8:  { name: 'Wet',    farbe: '#4a9eff' },
 };
+
+// weitere Klartext-Tabellen für die neuen Werte
+const WETTER  = ['Klar', 'Leicht bewölkt', 'Bedeckt', 'Leichter Regen', 'Starker Regen', 'Gewitter'];
+const GEMISCH = ['Mager', 'Standard', 'Fett', 'Maximal'];
+const ERS_MODE = ['Aus', 'Mittel', 'Hotlap', 'Überholen'];
+const FIA_FLAGGE = { 1: 'grün', 2: 'blau', 3: 'gelb', 4: 'rot' };  // -1/0 = keine
+const ERS_MAX = 4000000;   // ERS-Speicher max. 4 MJ (F1)
+
+// Sektorzeit aus "Minuten-Teil" + "Millisekunden-Teil" zusammensetzen
+function sektorMs(buf, o, msOff, minOff) {
+  const ms  = buf.readUInt16LE(o + msOff);
+  const min = buf.readUInt8(o + minOff);
+  const wert = min * 60000 + ms;
+  return wert > 0 ? wert : null;
+}
 
 // Liest den Kopf (Header) eines jeden Pakets
 function parseHeader(buf) {
@@ -88,7 +109,7 @@ function parse(buf, zustand) {
 
   switch (h.packetId) {
 
-    case 2: { // ---- Lap Data: Rundenzeiten & Position ----
+    case 2: { // ---- Lap Data: Rundenzeiten, Position, Sektoren, Strafen ----
       const f = L.lapData;
       const o = start(f.size);
       if (buf.length < o + f.size) break;
@@ -97,28 +118,45 @@ function parse(buf, zustand) {
       zustand.lapDistance  = buf.readFloatLE(o + f.lapDistance); // Meter seit Start/Ziel
       zustand.position     = buf.readUInt8(o + f.position);
       zustand.lapNum       = buf.readUInt8(o + f.lapNum);
+      zustand.sektor1Ms    = sektorMs(buf, o, f.s1ms, f.s1min);  // letzte S1-Zeit (ms)
+      zustand.sektor2Ms    = sektorMs(buf, o, f.s2ms, f.s2min);  // letzte S2-Zeit (ms)
+      zustand.pitStatus    = buf.readUInt8(o + f.pitStatus);     // 0 Strecke, 1 Boxeneinfahrt, 2 in Box
+      zustand.rundeUngueltig = buf.readUInt8(o + f.invalid) === 1;
+      zustand.strafenSek   = buf.readUInt8(o + f.penalties);     // Sekunden Zeitstrafe
       break;
     }
 
-    case 6: { // ---- Car Telemetry: Tempo & Reifen-Temperaturen ----
+    case 6: { // ---- Car Telemetry: Tempo, Gang, DRS, Reifen- & Bremstemp. ----
       const f = L.telemetry;
       const o = start(f.size);
       if (buf.length < o + f.size) break;
       zustand.speed = buf.readUInt16LE(o + f.speed); // km/h
+      zustand.gang  = buf.readInt8(o + f.gear);      // -1 R, 0 N, 1..8
+      zustand.rpm   = buf.readUInt16LE(o + f.rpm);   // Motordrehzahl
+      zustand.drsOffen = buf.readUInt8(o + f.drs) === 1;
       const oberflaeche = [0, 1, 2, 3].map(i => buf.readUInt8(o + f.surfaceTempStart + i));
       zustand.reifenTemp = vierRaeder(oberflaeche); // °C an der Reifenoberfläche
+      const bremsen = [0, 1, 2, 3].map(i => buf.readUInt16LE(o + f.brakesTempStart + i * 2));
+      zustand.bremsTemp = vierRaeder(bremsen);      // °C an den Bremsen
       break;
     }
 
-    case 7: { // ---- Car Status: Reifen-Mischung, Alter, Sprit ----
+    case 7: { // ---- Car Status: Reifen, Sprit, ERS, DRS-Freigabe, Flagge ----
       const f = L.status;
       const o = start(f.size);
       if (buf.length < o + f.size) break;
+      zustand.fuelMix           = GEMISCH[buf.readUInt8(o + f.fuelMix)] || null; // Sprit-Gemisch
       zustand.fuelInTank        = buf.readFloatLE(o + f.fuelInTank);        // kg Sprit im Tank
       zustand.fuelRemainingLaps = buf.readFloatLE(o + f.fuelRemainingLaps); // Reichweite in Runden
+      zustand.drsErlaubt        = buf.readUInt8(o + f.drsAllowed) === 1;    // DRS aktivierbar?
       const visual = buf.readUInt8(o + f.visualCompound);                   // Reifen-Mischung
       zustand.reifen      = REIFEN[visual] || { name: '—', farbe: '#888' };
       zustand.reifenAlter = buf.readUInt8(o + f.tyresAge);                  // Runden auf dem Reifen
+      const flagge = buf.readInt8(o + f.fiaFlags);
+      zustand.fiaFlagge   = FIA_FLAGGE[flagge] || null;                     // Streckenflagge
+      const ers = buf.readFloatLE(o + f.ersStore);                          // Joule im ERS-Speicher
+      zustand.ersProzent  = Math.max(0, Math.min(100, Math.round(ers / ERS_MAX * 100)));
+      zustand.ersModus    = ERS_MODE[buf.readUInt8(o + f.ersMode)] || null; // Einsatz-Modus
       break;
     }
 
@@ -131,9 +169,10 @@ function parse(buf, zustand) {
       break;
     }
 
-    case 1: { // ---- Session: Strecken- & Lufttemperatur ----
+    case 1: { // ---- Session: Wetter, Strecken- & Lufttemperatur ----
       const f = L.session;
       if (buf.length < HEADER_SIZE + 4) break;
+      zustand.wetter    = WETTER[buf.readUInt8(HEADER_SIZE + f.weather)] || null; // aktuelles Wetter
       zustand.trackTemp = buf.readInt8(HEADER_SIZE + f.trackTemp); // °C Asphalt
       zustand.airTemp   = buf.readInt8(HEADER_SIZE + f.airTemp);   // °C Luft
       zustand.totalLaps = buf.readUInt8(HEADER_SIZE + f.totalLaps);

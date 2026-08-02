@@ -24,14 +24,19 @@ Alles wird lokal im Browser gespeichert (localStorage). Einfach
 ## 🏎️ F1 Live-Dashboard (`f1-live/`)
 Zeigt **während des Fahrens** in F1 25/26 live im Browser an: Rundenzeit,
 letzte/beste Runde, welche Reifen, **Abnutzung pro Reifen in %**,
-Reifen-Temperaturen, Sprit & Reichweite – plus automatische Konstanz- und
-Reifen-Abbau-Analyse.
+Reifen-Temperaturen, Sprit & Reichweite, **ERS-Akku & Modus, DRS, Gang,
+Bremstemperaturen, Sprit-Gemisch, Wetter, Sektorzeiten, Flaggen & Strafen** –
+plus automatische Konstanz- und Reifen-Abbau-Analyse.
 
 Dazu ein **vorausschauender Renningenieur** mit Live-Ansagen (Text und
-optional gesprochen): Live-Delta zur Bestrunde, Boxenstopp-Fenster,
-Abbau-Kosten, Sprit-Sparziel, Stint-Zusammenfassung und Vergleich mit einer
-**Zielzeit**. Die Warn-Schwellen (Reifen heiß/kritisch) sind einstellbar.
-Reifen-Temperaturen sind nach Fenster farbig (kalt/optimal/heiß).
+optional gesprochen): Live-Delta zur Bestrunde, vorhergesagtes
+Boxenstopp-Fenster, Sprit bis zur Zielflagge, Pace-Trend, Abbau-Kosten,
+Stint-Zusammenfassung, Regen-/Flaggen-/Strafen-Warnungen und Vergleich mit
+einer **Zielzeit**. Auf Zuruf (Sprache oder Tippen) beantwortet er Fragen zu
+Reifen, Box, Sprit, Temperatur, Bremsen, ERS, DRS, Wetter, Sektoren, Position,
+Pace und Strafen – oder gibt auf „Strategie" den kompletten Plan. Läuft
+**kostenlos & offline**. Die Warn-Schwellen (Reifen heiß/kritisch) sind
+einstellbar. Reifen-Temperaturen sind nach Fenster farbig (kalt/optimal/heiß).
 
 Optional gibt es **🧠 Chef PRO** – einen *echten KI-Renningenieur* (Claude):
 du redest mit ihm wie mit einer Person (tippen oder per Sprache), und er sieht
